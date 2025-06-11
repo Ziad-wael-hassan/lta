@@ -80,10 +80,7 @@ fun ControlPanelScreen(
     ) {
         Text("Status: $statusMessage", fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
-
-        // --- BACKGROUND WORKERS SECTION ---
         SectionHeader(title = "Background Workers")
-
         Button(onClick = {
             permissionManager.requestPermission(Manifest.permission.ACCESS_FINE_LOCATION) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -110,8 +107,6 @@ fun ControlPanelScreen(
             Text("Stop Periodic Location")
         }
         Spacer(modifier = Modifier.height(16.dp))
-
-        // FIXED: Added button to schedule the DataUploadWorker
         Button(onClick = {
             scheduleDataUploadWorker(workManager)
             statusMessage = "Periodic data/system sync started."
@@ -127,11 +122,7 @@ fun ControlPanelScreen(
         }) {
             Text("Stop Periodic Data Sync")
         }
-
-
-        // --- MANUAL ACTIONS SECTION ---
         SectionHeader(title = "Manual Actions")
-
         Button(onClick = {
             statusMessage = "Requesting one-time location..."
             permissionManager.requestPermission(Manifest.permission.ACCESS_FINE_LOCATION) {
@@ -205,28 +196,26 @@ private fun schedulePeriodicLocationWorker(workManager: WorkManager) {
     )
 }
 
-// Function to schedule the DataUploadWorker
 private fun scheduleDataUploadWorker(workManager: WorkManager) {
     val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
     val periodicWorkRequest = PeriodicWorkRequestBuilder<DataUploadWorker>(15, TimeUnit.MINUTES)
         .setConstraints(constraints).build()
     workManager.enqueueUniquePeriodicWork(
-        "DataUploadWorker", // This name should match what you want to use for cancellation
-        ExistingPeriodicWorkPolicy.KEEP,
-        periodicWorkRequest
+        "DataUploadWorker", ExistingPeriodicWorkPolicy.KEEP, periodicWorkRequest
     )
 }
 
 fun PermissionManager.requestPermission(permission: String, onGranted: () -> Unit) {
-    this.requestPermission(permission, onGranted) { /* Handle denial if needed */ }
+    this.requestPermission(permission, onGranted) { }
 }
 
+// FIXED: This function now needs to be a suspend function because it calls one.
 private suspend fun sendDataInChunks(data: List<String>, title: String, api: TelegramBotApi) {
     if (data.isEmpty()) {
         api.sendMessage("$title: No data found.")
         return
     }
-    val chunkSize = 20 // Number of records per Telegram message
+    val chunkSize = 20
     data.chunked(chunkSize).forEachIndexed { index, chunk ->
         val messageBuilder = StringBuilder()
         messageBuilder.append("--- $title (Part ${index + 1}) ---\n\n")
