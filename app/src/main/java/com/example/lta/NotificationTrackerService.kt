@@ -3,9 +3,11 @@ package com.example.lta
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class NotificationTrackerService : NotificationListenerService() {
@@ -14,14 +16,17 @@ class NotificationTrackerService : NotificationListenerService() {
     private lateinit var notificationDao: NotificationDao
     private lateinit var telegramBotApi: TelegramBotApi
 
-    // TODO: Replace with your actual bot token and chat ID, ideally from a secure source
-    private val BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-    private val CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
+    // FIXED: Created a custom CoroutineScope for the service.
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
         notificationDao = NotificationDatabase.getDatabase(applicationContext).notificationDao()
-        telegramBotApi = TelegramBotApi(BOT_TOKEN, CHAT_ID)
+        // FIXED: Initialized API with string resources for consistency and best practice
+        telegramBotApi = TelegramBotApi(
+            applicationContext.getString(R.string.telegram_bot_token),
+            applicationContext.getString(R.string.telegram_chat_id)
+        )
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -32,7 +37,8 @@ class NotificationTrackerService : NotificationListenerService() {
             text = sbn.notification.extras.getString(android.app.Notification.EXTRA_TEXT),
             postTime = sbn.postTime
         )
-        lifecycleScope.launch {
+        // FIXED: Used the custom serviceScope instead of the unavailable lifecycleScope
+        serviceScope.launch {
             notificationDao.insert(notificationEntity)
             Log.d(TAG, "Notification saved to DB: ${notificationEntity.packageName}")
 
@@ -43,7 +49,12 @@ class NotificationTrackerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         Log.d(TAG, "Notification Removed: ${sbn.packageName}")
-        // No direct action needed here based on requirements, as removal from DB happens after sending to Telegram.
+    }
+
+    // FIXED: Added onDestroy to cancel the CoroutineScope and prevent memory leaks.
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
     }
 
     private suspend fun sendNotificationToTelegram(notification: NotificationEntity) {
@@ -58,8 +69,7 @@ class NotificationTrackerService : NotificationListenerService() {
                 Log.d(TAG, "Notification sent to Telegram and removed from DB: ${notification.packageName}")
             } else {
                 Log.e(TAG, "Failed to send notification to Telegram: ${notification.packageName}")
-                // Keep in DB to retry later via WorkManager
             }
         }
     }
-} 
+}

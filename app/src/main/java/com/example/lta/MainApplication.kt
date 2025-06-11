@@ -76,10 +76,9 @@ class MainApplication : Application(), Configuration.Provider {
         }
     }
 
-    override fun getWorkManagerConfiguration(): Configuration {
-        return Configuration.Builder()
+    // FIXED: Changed from a function to a property override to correctly implement Configuration.Provider
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
             .setMinimumLoggingLevel(android.util.Log.DEBUG)
-            .setDefaultProcessName("${packageName}:background")
             .build()
-    }
-} 
+}

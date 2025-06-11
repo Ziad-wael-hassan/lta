@@ -70,8 +70,8 @@ class LocationService : Service() {
     }
 
     private fun startLocationUpdates() {
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
-            .setIntervalMillis(LOCATION_UPDATE_INTERVAL)
+        // FIXED: Used the new LocationRequest.Builder constructor and removed the deprecated setIntervalMillis call.
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, LOCATION_UPDATE_INTERVAL)
             .setMinUpdateIntervalMillis(FASTEST_UPDATE_INTERVAL)
             .build()
 
