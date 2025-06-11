@@ -1,0 +1,143 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  # Using a modern JDK like 17 is recommended for running Gradle itself.
+  # This is compatible with your project's target of Java 11.
+  JAVA_VERSION: '17'
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true
+
+jobs:
+  build-and-release:
+    name: Build & Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+
+    steps:
+      - name: 🔍 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📊 Setup Build Environment Info
+        id: build-info
+        run: |
+          echo "::notice title=Build Info::Building version ${{ github.ref_name }} from commit ${{ github.sha }}"
+          echo "build-time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+          echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+
+      - name: ☕ Setup Java (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Granting execute permission for gradlew is a good practice in CI
+      - name: 🔐 Grant Gradle Execution Permissions
+        run: chmod +x ./gradlew
+        # If your gradlew is not in the root, adjust the working-directory
+        # working-directory: ./android
+
+      - name: 🔨 Build Release & Debug APKs
+        # If your project is not in a subdirectory named 'android', remove the working-directory line.
+        # Based on your previous workflow, it seems it is.
+        working-directory: ./
+        run: |
+          echo "::group::Building APK files"
+          ./gradlew assembleRelease assembleDebug --stacktrace
+          echo "::endgroup::"
+
+      - name: 🔎 Verify APK Generation
+        id: verify-apks
+        run: |
+          # The default output path for native Android is app/build/outputs/apk
+          RELEASE_APKS_PATH="app/build/outputs/apk/release"
+          DEBUG_APKS_PATH="app/build/outputs/apk/debug"
+          
+          echo "::group::Verifying Generated APK files"
+          if [ -d "$RELEASE_APKS_PATH" ]; then
+            echo "Release APKs found:"
+            ls -lR "$RELEASE_APKS_PATH"
+            echo "release_path=$RELEASE_APKS_PATH" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Release APK directory not found."
+            echo "release_path=" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -d "$DEBUG_APKS_PATH" ]; then
+            echo "Debug APKs found:"
+            ls -lR "$DEBUG_APKS_PATH"
+            echo "debug_path=$DEBUG_APKS_PATH" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Debug APK directory not found."
+            echo "debug_path=" >> $GITHUB_OUTPUT
+          fi
+
+          APK_COUNT=$(find app/build/outputs/apk -name "*.apk" -print -quit | wc -l)
+          if [ "$APK_COUNT" -eq 0 ]; then
+            echo "::error title=Build Failed::No APK files were generated."
+            exit 1
+          fi
+          echo "::notice title=Build Success::APK files generated successfully."
+          echo "::endgroup::"
+
+      - name: 📤 Upload APKs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.verify-apks.outputs.release_path }}/*.apk
+            ${{ steps.verify-apks.outputs.debug_path }}/*.apk
+          fail_on_unmatched_files: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📱 Send arm64 APKs to Telegram
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "::group::Sending arm64-v8a APKs to Telegram"
+          
+          send_apk() {
+            local FILE_PATH=$1
+            if [[ -z "$FILE_PATH" || ! -f "$FILE_PATH" ]]; then
+              echo "::error::Invalid file path provided to send_apk function."
+              return 1
+            fi
+
+            local FILE_NAME=$(basename "$FILE_PATH")
+            local NL=$'\n'
+            local CAPTION="📦 *${FILE_NAME}*${NL}🔖 Version: *${{ steps.build-info.outputs.version }}*${NL}📅 Built: *${{ steps.build-info.outputs.build-time }}*"
+
+            echo "::notice::Sending ${FILE_NAME} to Telegram..."
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" -F chat_id="${TELEGRAM_CHAT_ID}" -F document=@"$FILE_PATH" -F caption="$CAPTION" -F parse_mode=Markdown)
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+
+            if [ "$HTTP_CODE" -eq 200 ]; then
+              echo "::notice title=Telegram Success::✅ Successfully sent ${FILE_NAME}"
+            else
+              BODY=$(echo "$RESPONSE" | head -n -1)
+              echo "::error title=Telegram Failed::❌ Failed to send ${FILE_NAME} (HTTP $HTTP_CODE). Response: $BODY"
+            fi
+          }
+          
+          echo "Searching for arm64-v8a APKs to send..."
+          
+          find ${{ steps.verify-apks.outputs.release_path }} ${{ steps.verify-apks.outputs.debug_path }} \
+            -type f -name "*arm64-v8a*.apk" | while IFS= read -r apk_file; do
+            send_apk "$apk_file"
+          done
+          
+          echo "::endgroup::"
