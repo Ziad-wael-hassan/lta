@@ -1,3 +1,5 @@
+// build.gradle.kts
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -10,12 +12,17 @@ android {
     compileSdk = 35
 
     signingConfigs {
-        debug {
+        // FIXED: The 'debug' signing configuration must be defined inside the 'signingConfigs' block.
+        // We use .create("debug") to define it.
+        create("debug") {
+            // This uses the default debug keystore provided by Android Studio
             storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // You could create a 'release' config here in the future
+        // create("release") { ... }
     }
 
     defaultConfig {
@@ -32,6 +39,8 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            
+            // Correctly assigns the 'debug' signing config to the 'release' build type.
             signingConfig = signingConfigs.getByName("debug")
 
             proguardFiles(
@@ -40,6 +49,8 @@ android {
             )
         }
         debug {
+            // The 'debug' build type automatically uses the 'debug' signing config by name convention.
+            // This line is good for clarity but often not strictly necessary.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -88,7 +99,7 @@ dependencies {
 
     // Network Libraries
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.retrofit2:retrofit:2.9.0") // Retrofit is here but not used, still good to have rules
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.google.code.gson:gson:2.10.1")
 
