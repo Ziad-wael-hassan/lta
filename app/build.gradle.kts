@@ -69,6 +69,16 @@ dependencies {
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    // Network Library (Placeholder for Telegram API)
+    // Network Libraries
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    // Location Services
+    implementation("com.google.android.gms:play-services-location:21.1.0")
+
+    // Lifecycle components
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-service:2.7.0")
 }
