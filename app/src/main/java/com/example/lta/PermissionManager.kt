@@ -1,14 +1,18 @@
 package com.example.lta
 
 import android.Manifest
-import android.app.Activity
-import android.content.Context
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
+/**
+ * Manages permission requests using the Activity Result API.
+ * NOTE: This class is stateful. It is designed to handle one permission request at a time.
+ * The build error associated with this class is resolved by updating the `androidx.fragment:fragment-ktx`
+ * dependency to version 1.3.0+ in your app's build.gradle file.
+ */
 class PermissionManager(private val activity: ComponentActivity) {
 
     private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
@@ -16,6 +20,7 @@ class PermissionManager(private val activity: ComponentActivity) {
     private var onPermissionDenied: (() -> Unit)? = null
 
     init {
+        // This registration must happen early in the Activity's lifecycle.
         requestPermissionLauncher = activity.registerForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { isGranted: Boolean ->
@@ -37,10 +42,11 @@ class PermissionManager(private val activity: ComponentActivity) {
                 onGranted.invoke()
             }
             else -> {
+                // Set the callbacks for the next launch
                 onPermissionGranted = onGranted
                 onPermissionDenied = onDenied
                 requestPermissionLauncher.launch(permission)
             }
         }
     }
-} 
+}

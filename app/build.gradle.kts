@@ -1,3 +1,5 @@
+// build.gradle.kts
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -59,9 +61,9 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     // Room
-    implementation( "androidx.room:room-runtime:2.6.1")
-    implementation( "androidx.room:room-ktx:2.6.1")
-    kapt( "androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
@@ -81,4 +83,9 @@ dependencies {
     // Lifecycle components
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-service:2.7.0")
+
+    // FIXED: Added explicit activity-ktx and fragment-ktx dependencies to resolve the
+    // "InvalidFragmentVersionForActivityResult" lint error.
+    implementation("androidx.activity:activity-ktx:1.8.2")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
 }
