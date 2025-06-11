@@ -10,7 +10,7 @@ git add .
 read -p "📝 Enter commit message: " message
 
 # Step 3: Commit the changes
-git commit -m "commit"
+git commit -m "$message"
 
 # Step 4: Get latest tag
 latest_tag=$(git tag --sort=-v:refname | head -n 1)
