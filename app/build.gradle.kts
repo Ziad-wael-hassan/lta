@@ -12,16 +12,21 @@ android {
     compileSdk = 35
 
     signingConfigs {
-        // FIXED: Use getByName("debug") to access and configure the *existing* debug signing config
-        // that Android Gradle Plugin creates by default. Do not use create("debug").
+        // Configure the existing 'debug' signing config.
         getByName("debug") {
-            // This configures the default debug keystore provided by Android Studio
-            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            // This is the default path for the debug keystore.
+            val debugKeystore = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            
+            // FIXED: Only configure the signing key if the file actually exists.
+            // This prevents build failures in clean environments like GitHub Actions before the key is generated.
+            if (debugKeystore.exists()) {
+                storeFile = debugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
-        // You could create a 'release' config here in the future with create("release") { ... }
+        // You could create a 'release' config here in the future with create("release")
     }
 
     defaultConfig {
@@ -39,7 +44,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             
-            // This correctly assigns the 'debug' signing config to the 'release' build type.
+            // This assigns the 'debug' signing config to the 'release' build type.
+            // If the key doesn't exist, this build will be unsigned but will not crash.
             signingConfig = signingConfigs.getByName("debug")
 
             proguardFiles(
