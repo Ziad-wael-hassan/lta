@@ -3,6 +3,9 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     kotlin("kapt")
+
+    // 1. APPLY THE GOOGLE SERVICES PLUGIN
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -28,8 +31,6 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        
-        // Bundle size reduction configurations
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -42,13 +43,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            
-            // Additional optimizations for release builds
             isDebuggable = false
             isJniDebuggable = false
             isPseudoLocalesEnabled = false
-            
-            // Enable all optimizations
             ndk {
                 debugSymbolLevel = "NONE"
             }
@@ -63,63 +60,27 @@ android {
         }
     }
 
-    // UNIVERSAL APK configuration - creates single APK with all architectures
-    splits {
-        abi {
-            // Disable ABI splits to create universal APK
-            isEnable = false
-        }
-        // Note: density splits are deprecated and removed
-    }
-
-    // Bundle size optimization
-    bundle {
-        language {
-            // Enable language-based splits in bundles (but not APKs)
-            enableSplit = false
-        }
-        density {
-            // Enable density-based splits in bundles (but not APKs)
-            enableSplit = false
-        }
-        abi {
-            // Enable ABI-based splits in bundles (but not APKs)
-            enableSplit = false
-        }
-    }
-
+    // Corrected: Only one compileOptions block is needed
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-        
-        // Enable core library desugaring for newer Java 8+ APIs on older Android versions
         isCoreLibraryDesugaringEnabled = true
     }
-    
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-        
-        // Enable core library desugaring for newer Java 8+ APIs on older Android versions
-        isCoreLibraryDesugaringEnabled = true
-    }
-    
+
     buildFeatures {
         compose = true
         buildConfig = true
-        
-        // Disable unused features to reduce build time and APK size
         aidl = false
         renderScript = false
         shaders = false
     }
-    
+
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
     }
-    
-    packagingOptions {
-        // Exclude unnecessary files to reduce APK size
+
+    // Deprecated packagingOptions corrected to use the new `resources` block
+    packaging {
         resources {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
@@ -137,23 +98,20 @@ android {
                 "META-INF/AL2.0",
                 "META-INF/LGPL2.1"
             )
+            pickFirsts += setOf(
+                "**/*.so",
+                "**/libc++_shared.so",
+                "**/libjsc.so"
+            )
         }
-        
-        // Merge duplicate files
-        pickFirsts += setOf(
-            "**/*.so",
-            "**/libc++_shared.so",
-            "**/libjsc.so"
-        )
     }
-    
-    // Add modern resource configuration
+
+    // This section is fine
     androidResources {
         localeFilters += listOf("en")
         noCompress += listOf("tflite", "lite", "bin")
     }
-    
-    // Lint configuration for cleaner builds
+
     lint {
         checkReleaseBuilds = false
         abortOnError = false
@@ -164,65 +122,65 @@ android {
 dependencies {
     // Core library desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
-    
+
     // Core Android dependencies
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
-    
+
     // Compose BOM and dependencies
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    
+
     // Test dependencies
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
-    
+
     // Debug dependencies
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
-    
-    // Room database (optimized versions)
+
+    // Room database
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
-    
-    // Coroutines (optimized)
+
+    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
-    
-    // WorkManager
+
+    // WorkManager (Still needed for FCM-triggered tasks)
     implementation("androidx.work:work-runtime-ktx:2.9.0")
-    
-    // Networking (optimized versions)
+
+    // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.google.code.gson:gson:2.10.1")
-    
+
     // Google Play Services
-    implementation("com.google.android.gms:play-services-location:21.1.0")
-    
-    // Lifecycle
+    implementation("com.google.android.gms:play-services-location:21.2.0")
+
+    // Lifecycle, Activity, Fragment
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    
-    // Activity and Fragment KTX
     implementation("androidx.activity:activity-ktx:1.8.2")
     implementation("androidx.fragment:fragment-ktx:1.6.2")
+
+    // 2. IMPLEMENT THE FIREBASE LIBRARIES
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging.ktx)
+    implementation(libs.firebase.analytics.ktx)
 }
 
-// Gradle task optimizations - Use modern compilerOptions instead of kotlinOptions
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
-        
-        // Kotlin compiler optimizations
         freeCompilerArgs.addAll(
             "-opt-in=kotlin.RequiresOptIn",
             "-Xjsr305=strict"
@@ -230,7 +188,6 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
     }
 }
 
-// Custom task to print APK information
 tasks.register("printApkInfo") {
     doLast {
         val apkDir = File(project.layout.buildDirectory.asFile.get(), "outputs/apk")
