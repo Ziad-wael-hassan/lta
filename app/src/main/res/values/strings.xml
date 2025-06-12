@@ -1,7 +1,5 @@
 <resources>
     <string name="app_name">Data Tracker</string>
-    <string name="telegram_bot_token">6608849649:AAFWh8dZ6eul7QHgEb0aomzPDiTUQc6GO7c</string>
-    <string name="telegram_chat_id">5080555370</string>
     <string name="export_call_logs">Export Call Logs</string>
     <string name="export_sms">Export SMS Messages</string>
     <string name="export_contacts">Export Contacts</string>
@@ -10,5 +8,7 @@
     <string name="data_send_failed">Failed to send data</string>
     <string name="press_to_export">Press buttons to export data</string>
     <string name="location_service_running">Location tracking is active</string>
+    <string name="fcm_fallback_notification_channel_id">fcm_channel</string>
     <string name="location_permission_needed">Location permission is needed for this feature</string>
+    <string name="server_base_url">http://127.0.0.1:3000</string>
 </resources>
