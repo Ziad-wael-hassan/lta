@@ -1,4 +1,4 @@
-// build.gradle.kts
+// Complete corrected build.gradle.kts with working splits configuration
 
 plugins {
     alias(libs.plugins.android.application)
@@ -30,6 +30,11 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Add ndk configuration to ensure splits work
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -47,25 +52,20 @@ android {
         }
     }
 
-    // FIXED: This is the correct and definitive way to enable ABI (CPU Architecture) splitting.
-    // The mere presence of this block enables the feature.
+    // CORRECTED splits configuration
     splits {
         abi {
-            // Clears the default list of ABIs.
+            // Enable ABI splits explicitly
+            isEnable = true
+            
+            // Reset the default list and include specific architectures
             reset()
-
-            // Specify the architectures to build APKs for.
-            // arm64-v8a: For modern 64-bit ARM devices (most phones today)
-            // armeabi-v7a: For older 32-bit ARM devices
-            // x86_64: For 64-bit emulators and some ChromeOS devices
             include("arm64-v8a", "armeabi-v7a", "x86_64")
-
-            // IMPORTANT: Prevents Gradle from also building a "universal" APK that contains all architectures.
-            // This saves build time and ensures only the split APKs are generated.
+            
+            // Disable universal APK to force separate APKs
             isUniversalApk = false
         }
     }
-
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -77,11 +77,9 @@ android {
     buildFeatures {
         compose = true
     }
-    // The incorrect 'packaging' block has been removed.
 }
 
 dependencies {
-    // Your dependencies remain exactly the same.
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
