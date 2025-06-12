@@ -1,7 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
+    // CORRECT way to apply the Compose plugin in the app module
+    id("org.jetbrains.kotlin.plugin.compose")
     kotlin("kapt")
     alias(libs.plugins.googleServices)
 }
@@ -58,7 +59,6 @@ android {
         }
     }
 
-    // Corrected: Only one compileOptions block is needed
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -74,10 +74,10 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
+        // This version should match the Kotlin version for best results
+        kotlinCompilerExtensionVersion = "1.5.8" // For Kotlin 1.9.23
     }
 
-    // Deprecated packagingOptions corrected to use the new `resources` block
     packaging {
         resources {
             excludes += setOf(
@@ -102,18 +102,6 @@ android {
                 "**/libjsc.so"
             )
         }
-    }
-
-    // This section is fine
-    androidResources {
-        localeFilters += listOf("en")
-        noCompress += listOf("tflite", "lite", "bin")
-    }
-
-    lint {
-        checkReleaseBuilds = false
-        abortOnError = false
-        disable += setOf("MissingTranslation", "ExtraTranslation")
     }
 }
 
@@ -170,39 +158,8 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.8.2")
     implementation("androidx.fragment:fragment-ktx:1.6.2")
 
-    // 2. IMPLEMENT THE FIREBASE LIBRARIES
+    // Firebase Libraries
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging.ktx)
     implementation(libs.firebase.analytics.ktx)
-}
-
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
-        freeCompilerArgs.addAll(
-            "-opt-in=kotlin.RequiresOptIn",
-            "-Xjsr305=strict"
-        )
-    }
-}
-
-tasks.register("printApkInfo") {
-    doLast {
-        val apkDir = File(project.layout.buildDirectory.asFile.get(), "outputs/apk")
-        if (apkDir.exists()) {
-            apkDir.walkTopDown().filter { it.extension == "apk" }.forEach { apk ->
-                println("APK: ${apk.name}")
-                println("Size: ${apk.length() / 1024 / 1024} MB")
-                println("Path: ${apk.absolutePath}")
-                println("---")
-            }
-        }
-    }
-}
-
-// Ensure printApkInfo runs after assembly
-tasks.whenTaskAdded {
-    if (name.startsWith("assemble")) {
-        finalizedBy("printApkInfo")
-    }
 }
