@@ -28,8 +28,9 @@ class MainApplication : Application(), Configuration.Provider {
         super.onCreate()
         createNotificationChannels()
 
-        // Trigger the device registration process on app startup.
-        registerDeviceOnFirstLoad()
+        // Trigger the initial token fetch. The actual registration is now handled
+        // by MyFirebaseMessagingService.onNewToken()
+        triggerInitialTokenFetch()
     }
 
     /**
@@ -37,13 +38,14 @@ class MainApplication : Application(), Configuration.Provider {
      */
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(NotificationManager::class.java)
             NotificationChannel(
                 LOCATION_CHANNEL_ID,
                 "Location Updates",
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Notifications for location worker status."
-                getSystemService(NotificationManager::class.java).createNotificationChannel(this)
+                notificationManager.createNotificationChannel(this)
             }
             NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
@@ -51,44 +53,34 @@ class MainApplication : Application(), Configuration.Provider {
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "General app notifications"
-                getSystemService(NotificationManager::class.java).createNotificationChannel(this)
+                notificationManager.createNotificationChannel(this)
             }
         }
     }
 
     /**
-     * Fetches the FCM token and device model, then sends them to the backend server
-     * for registration. This runs in a background coroutine to avoid blocking the main thread.
+     * Proactively fetches the FCM token on app start.
+     * If a new token is generated, MyFirebaseMessagingService.onNewToken() will be
+     * called automatically by the FCM SDK, which then handles server registration.
+     * This ensures registration happens as early as possible.
      */
-    private fun registerDeviceOnFirstLoad() {
+    private fun triggerInitialTokenFetch() {
         applicationScope.launch {
             try {
-                // 1. Initialize the necessary managers
-                val apiClient = ApiClient(getString(R.string.server_base_url))
-                val systemInfoManager = SystemInfoManager(applicationContext)
-
-                // 2. Get the FCM token and device model
-                val fcmToken = Firebase.messaging.token.await()
-                val deviceModel = systemInfoManager.getDeviceModel()
-
-                Log.d("MainApplication", "Preparing to register device: Model=$deviceModel, Token=$fcmToken")
-
-                // 3. Send the registration data to the server
-                val success = apiClient.registerDevice(fcmToken, deviceModel)
-
-                if (success) {
-                    Log.i("MainApplication", "Device registration request sent successfully.")
-                } else {
-                    Log.e("MainApplication", "Device registration request failed. Will retry on next app start.")
-                }
+                val token = Firebase.messaging.token.await()
+                Log.d("MainApplication", "Initial token fetch successful. Token starts with: ${token.take(10)}")
+                // No further action is needed here. The service handles the registration logic.
             } catch (e: Exception) {
-                Log.e("MainApplication", "Could not get FCM token for registration", e)
+                Log.e("MainApplication", "Initial FCM token fetch failed", e)
             }
         }
     }
 
+    /**
+     * Provides a custom WorkManager configuration.
+     */
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
-            .setMinimumLoggingLevel(android.util.Log.DEBUG)
+            .setMinimumLoggingLevel(Log.DEBUG)
             .build()
 }

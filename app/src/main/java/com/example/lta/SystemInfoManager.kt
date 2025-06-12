@@ -40,6 +40,11 @@ class SystemInfoManager(private val context: Context) {
     }
     
 
+
+    fun getDeviceId(): String {
+        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+    }
+    
     fun getBatteryInfo(): String {
         val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { filter ->
             context.registerReceiver(null, filter)
