@@ -1,3 +1,4 @@
+# release.yml
 name: Build & Release APK
 
 on:
@@ -45,24 +46,33 @@ jobs:
       # Granting execute permission for gradlew is a good practice in CI
       - name: 🔐 Grant Gradle Execution Permissions
         run: chmod +x ./gradlew
-        # If your gradlew is not in the root, adjust the working-directory
-        # working-directory: ./android
 
-      - name: 🔨 Build Release & Debug APKs
-        # If your project is not in a subdirectory named 'android', remove the working-directory line.
-        # Based on your previous workflow, it seems it is.
-        working-directory: ./
+      # Add debugging step to check splits configuration
+      - name: 🔍 Debug Gradle Configuration
         run: |
-          echo "::group::Building APK files"
-          ./gradlew assembleRelease assembleDebug --stacktrace
+          echo "::group::Checking Gradle configuration"
+          ./gradlew help --task :app:assembleRelease
+          echo "::endgroup::"
+          
+          echo "::group::Checking splits configuration"
+          ./gradlew :app:tasks --all | grep -i split || echo "No split tasks found"
           echo "::endgroup::"
 
-      - name: 🔎 Verify APK Generation
+      - name: 🔨 Build Release & Debug APKs
+        run: |
+          echo "::group::Building APK files with verbose output"
+          ./gradlew assembleRelease assembleDebug --info --stacktrace
+          echo "::endgroup::"
+
+      - name: 🔎 Verify APK Generation (Enhanced)
         id: verify-apks
         run: |
-          # The default output path for native Android is app/build/outputs/apk
           RELEASE_APKS_PATH="app/build/outputs/apk/release"
           DEBUG_APKS_PATH="app/build/outputs/apk/debug"
+          
+          echo "::group::Complete APK directory structure"
+          find app/build/outputs -type f -name "*.apk" -exec ls -la {} \; || echo "No APKs found"
+          echo "::endgroup::"
           
           echo "::group::Verifying Generated APK files"
           if [ -d "$RELEASE_APKS_PATH" ]; then
@@ -83,12 +93,21 @@ jobs:
             echo "debug_path=" >> $GITHUB_OUTPUT
           fi
 
-          APK_COUNT=$(find app/build/outputs/apk -name "*.apk" -print -quit | wc -l)
+          APK_COUNT=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | wc -l)
           if [ "$APK_COUNT" -eq 0 ]; then
             echo "::error title=Build Failed::No APK files were generated."
             exit 1
           fi
-          echo "::notice title=Build Success::APK files generated successfully."
+          
+          echo "::notice title=Build Success::$APK_COUNT APK files generated successfully."
+          
+          # Check if splits were actually generated
+          SPLIT_COUNT=$(find app/build/outputs/apk -name "*-arm64-v8a*.apk" -o -name "*-armeabi-v7a*.apk" -o -name "*-x86_64*.apk" 2>/dev/null | wc -l)
+          if [ "$SPLIT_COUNT" -gt 0 ]; then
+            echo "::notice title=Splits Success::$SPLIT_COUNT split APKs generated."
+          else
+            echo "::warning title=No Splits::No architecture-specific APKs found. Universal APKs may have been generated instead."
+          fi
           echo "::endgroup::"
 
       - name: 📤 Upload APKs to GitHub Release
@@ -135,9 +154,17 @@ jobs:
           
           echo "Searching for arm64-v8a APKs to send..."
           
-          find ${{ steps.verify-apks.outputs.release_path }} ${{ steps.verify-apks.outputs.debug_path }} \
-            -type f -name "*arm64-v8a*.apk" | while IFS= read -r apk_file; do
+          # Search in both release and debug paths, and also search for any APK with arm64-v8a in the name
+          find app/build/outputs/apk -type f \( -name "*arm64-v8a*.apk" -o -name "*-arm64*.apk" \) 2>/dev/null | while IFS= read -r apk_file; do
             send_apk "$apk_file"
           done
+          
+          # If no architecture-specific APKs found, send universal APKs as fallback
+          if [ $(find app/build/outputs/apk -type f \( -name "*arm64-v8a*.apk" -o -name "*-arm64*.apk" \) 2>/dev/null | wc -l) -eq 0 ]; then
+            echo "::warning::No arm64-v8a specific APKs found, sending universal APKs instead..."
+            find app/build/outputs/apk -type f -name "*.apk" 2>/dev/null | while IFS= read -r apk_file; do
+              send_apk "$apk_file"
+            done
+          fi
           
           echo "::endgroup::"
