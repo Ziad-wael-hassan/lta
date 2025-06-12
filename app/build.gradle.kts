@@ -3,9 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     kotlin("kapt")
-
-    // 1. APPLY THE GOOGLE SERVICES PLUGIN
-    alias(libs.plugins.google.services)
+    alias(libs.plugins.googleServices)
 }
 
 android {
