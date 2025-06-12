@@ -7,6 +7,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.telephony.TelephonyManager
+import android.os.Build
 
 class SystemInfoManager(private val context: Context) {
 
@@ -33,6 +34,11 @@ class SystemInfoManager(private val context: Context) {
             else -> "No Network"
         }
     }
+
+    fun getDeviceModel(): String {
+        return Build.MODEL
+    }
+    
 
     fun getBatteryInfo(): String {
         val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { filter ->
