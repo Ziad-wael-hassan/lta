@@ -205,11 +205,12 @@ fun ControlPanelScreen(
         Spacer(modifier = Modifier.height(16.dp))
         
         Button(onClick = {
+            // FIX: Removed named arguments and passed them positionally.
             exportDataAsCsv(
-                dataType = "Call Logs",
-                mainPermission = Manifest.permission.READ_CALL_LOG,
-                secondPermission = Manifest.permission.READ_CONTACTS, // Ask for contacts to get names
-                csvProvider = manualDataManager::getCallLogsAsCsv
+                "Call Logs",
+                Manifest.permission.READ_CALL_LOG,
+                Manifest.permission.READ_CONTACTS, // Ask for contacts to get names
+                manualDataManager::getCallLogsAsCsv
             )
         }) {
             Text("Export Call Logs as CSV")
@@ -217,11 +218,12 @@ fun ControlPanelScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(onClick = {
+            // FIX: Removed named arguments and passed them positionally.
             exportDataAsCsv(
-                dataType = "SMS",
-                mainPermission = Manifest.permission.READ_SMS,
-                secondPermission = Manifest.permission.READ_CONTACTS, // Ask for contacts to get names
-                csvProvider = manualDataManager::getSmsAsCsv
+                "SMS",
+                Manifest.permission.READ_SMS,
+                Manifest.permission.READ_CONTACTS, // Ask for contacts to get names
+                manualDataManager::getSmsAsCsv
             )
         }) {
             Text("Export SMS as CSV")
@@ -229,11 +231,12 @@ fun ControlPanelScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(onClick = {
+            // FIX: Removed named arguments and passed them positionally.
             exportDataAsCsv(
-                dataType = "Contacts",
-                mainPermission = Manifest.permission.READ_CONTACTS,
-                secondPermission = null, // No second permission needed
-                csvProvider = manualDataManager::getContactsAsCsv
+                "Contacts",
+                Manifest.permission.READ_CONTACTS,
+                null, // No second permission needed
+                manualDataManager::getContactsAsCsv
             )
         }) {
             Text("Export Contacts as CSV")
