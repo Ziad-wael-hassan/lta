@@ -47,26 +47,16 @@ android {
         }
     }
 
-    // NEW: Add this block to enable ABI (CPU Architecture) splitting.
-    // This will generate a separate APK for each architecture, which is what your workflow expects.
-    splits {
-        abi {
-            // Enables ABI splitting.
-            enable = true
-
-            // By default, all architectures are included. `reset()` clears this list
-            // so we can specify exactly which ones we want.
-            reset()
-
-            // Specify the architectures to build APKs for.
-            // arm64-v8a: For modern 64-bit ARM devices (most phones today)
-            // armeabi-v7a: For older 32-bit ARM devices
-            // x86_64: For 64-bit emulators and some ChromeOS devices
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-
-            // IMPORTANT: Prevents Gradle from also building a "universal" APK that contains all architectures.
-            // This saves build time and ensures only the split APKs are generated.
-            isUniversalApk = false
+    // FIXED: Replaced the outdated `splits` block with the modern `packaging` block for ABI splitting.
+    packaging {
+        jniLibs {
+            // This is the modern equivalent of enabling ABI splits.
+            // It tells Gradle to package native libraries for specific ABIs separately.
+            useLegacyPackaging = true // Keep this for wider compatibility if needed, can be false for pure JNI projects.
+        }
+        resources {
+            // Excludes unnecessary metadata files from the final APK to reduce size.
+            excludes.add("/META-INF/{AL2.0,LGPL2.1}")
         }
     }
 
