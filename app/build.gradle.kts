@@ -4,7 +4,7 @@ plugins {
     // CORRECT way to apply the Compose plugin in the app module
     id("org.jetbrains.kotlin.plugin.compose")
     kotlin("kapt")
-    alias(libs.plugins.googleServices)
+    alias(libs.plugins.google.services)
 }
 
 android {
