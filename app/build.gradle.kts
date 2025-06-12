@@ -1,271 +1,258 @@
-# release.yml
-name: Build & Release APK
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    kotlin("kapt")
+}
 
-on:
-  push:
-    tags:
-      - 'v*'
+android {
+    namespace = "com.example.lta"
+    compileSdk = 35
 
-env:
-  # Using a modern JDK like 17 is recommended for running Gradle itself.
-  # This is compatible with your project's target of Java 11.
-  JAVA_VERSION: '17'
-  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.configureondemand=true -Dkotlin.incremental=false -Dkotlin.compiler.execution.strategy=in-process
+    signingConfigs {
+        getByName("debug") {
+            val debugKeystore = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            if (debugKeystore.exists()) {
+                storeFile = debugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
 
-jobs:
-  build-and-release:
-    name: Build & Release APK
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: write
+    defaultConfig {
+        applicationId = "com.example.lta"
+        minSdk = 24
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Bundle size reduction configurations
+        vectorDrawables.useSupportLibrary = true
+        
+        // Optimize for smaller APK size
+        resConfigs("en", "xxhdpi")
+    }
 
-    steps:
-      - name: 🔍 Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 📊 Setup Build Environment Info
-        id: build-info
-        run: |
-          echo "::notice title=Build Info::Building version ${{ github.ref_name }} from commit ${{ github.sha }}"
-          echo "build-time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
-          echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-
-      - name: ☕ Setup Java (JDK)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: 'gradle'
-
-      - name: 🤖 Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      # Granting execute permission for gradlew is a good practice in CI
-      - name: 🔐 Grant Gradle Execution Permissions
-        run: chmod +x ./gradlew
-
-      - name: 🔨 Build Universal Release & Debug APKs
-        run: |
-          echo "::group::Building Universal APK files with bundle size optimization"
-          ./gradlew assembleRelease assembleDebug \
-            --stacktrace \
-            --no-daemon \
-            --parallel \
-            --configure-on-demand \
-            -Pandroid.enableR8.fullMode=true \
-            -Pandroid.enableR8=true \
-            -Pandroid.useAndroidX=true \
-            -Pandroid.enableJetifier=true \
-            -Pandroid.bundle.enableUncompressedNativeLibs=false \
-            -Pandroid.injected.build.api=30 \
-            -Pandroid.injected.build.abi=universal \
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseG1GC -XX:+UseStringDeduplication" \
-            -Dkotlin.incremental=false \
-            -Dkotlin.compiler.execution.strategy=in-process
-          echo "::endgroup::"
-
-      - name: 🔎 Verify Universal APK Generation
-        id: verify-apks
-        run: |
-          RELEASE_APKS_PATH="app/build/outputs/apk/release"
-          DEBUG_APKS_PATH="app/build/outputs/apk/debug"
-          
-          echo "::group::Verifying Generated Universal APK files"
-          if [ -d "$RELEASE_APKS_PATH" ]; then
-            echo "Release APKs found:"
-            ls -la "$RELEASE_APKS_PATH"/*.apk
-            echo "release_path=$RELEASE_APKS_PATH" >> $GITHUB_OUTPUT
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             
-            # Get file sizes for release APKs
-            for apk in "$RELEASE_APKS_PATH"/*.apk; do
-              if [ -f "$apk" ]; then
-                SIZE=$(du -h "$apk" | cut -f1)
-                echo "::notice::Release APK: $(basename "$apk") - Size: $SIZE"
-              fi
-            done
-          else
-            echo "::warning::Release APK directory not found."
-            echo "release_path=" >> $GITHUB_OUTPUT
-          fi
-          
-          if [ -d "$DEBUG_APKS_PATH" ]; then
-            echo "Debug APKs found:"
-            ls -la "$DEBUG_APKS_PATH"/*.apk
-            echo "debug_path=$DEBUG_APKS_PATH" >> $GITHUB_OUTPUT
+            // Additional optimizations for release builds
+            isDebuggable = false
+            isJniDebuggable = false
+            isRenderscriptDebuggable = false
+            isPseudoLocalesEnabled = false
             
-            # Get file sizes for debug APKs
-            for apk in "$DEBUG_APKS_PATH"/*.apk; do
-              if [ -f "$apk" ]; then
-                SIZE=$(du -h "$apk" | cut -f1)
-                echo "::notice::Debug APK: $(basename "$apk") - Size: $SIZE"
-              fi
-            done
-          else
-            echo "::warning::Debug APK directory not found."
-            echo "debug_path=" >> $GITHUB_OUTPUT
-          fi
+            // Enable all optimizations
+            ndk {
+                debugSymbolLevel = "NONE"
+            }
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = true
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+    }
 
-          APK_COUNT=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | wc -l)
-          if [ "$APK_COUNT" -eq 0 ]; then
-            echo "::error title=Build Failed::No APK files were generated."
-            exit 1
-          fi
-          
-          echo "::notice title=Build Success::$APK_COUNT Universal APK files generated successfully."
-          echo "::endgroup::"
+    // UNIVERSAL APK configuration - creates single APK with all architectures
+    splits {
+        abi {
+            // Disable ABI splits to create universal APK
+            isEnable = false
+        }
+        density {
+            // Disable density splits to create universal APK
+            isEnable = false
+        }
+    }
 
-      - name: 📤 Upload APKs to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ steps.verify-apks.outputs.release_path }}/*.apk
-            ${{ steps.verify-apks.outputs.debug_path }}/*.apk
-          fail_on_unmatched_files: false
-          generate_release_notes: true
-          body: |
-            ## 📱 Universal APK Release
-            
-            This release contains universal APKs that work on all Android architectures.
-            
-            **Build Information:**
-            - Version: ${{ steps.build-info.outputs.version }}
-            - Built: ${{ steps.build-info.outputs.build-time }}
-            - Commit: ${{ github.sha }}
-            
-            **APK Types:**
-            - **Release APKs**: Optimized production builds
-            - **Debug APKs**: Development builds with debugging symbols
-            
-            **Download the appropriate APK for your needs:**
-            - For production use: Download the **release** APK
-            - For testing/development: Download the **debug** APK
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    // Bundle size optimization
+    bundle {
+        language {
+            // Enable language-based splits in bundles (but not APKs)
+            enableSplit = false
+        }
+        density {
+            // Enable density-based splits in bundles (but not APKs)
+            enableSplit = false
+        }
+        abi {
+            // Enable ABI-based splits in bundles (but not APKs)
+            enableSplit = false
+        }
+    }
 
-      - name: 📱 Send Universal APKs to Telegram
-        if: success() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != ''
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          echo "::group::Sending Universal APKs to Telegram"
-          
-          # Check if secrets are configured
-          if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
-            echo "::warning::Telegram bot token or chat ID not configured. Skipping Telegram notification."
-            echo "::endgroup::"
-            exit 0
-          fi
-          
-          send_apk() {
-            local FILE_PATH=$1
-            local APK_TYPE=$2
-            if [[ -z "$FILE_PATH" || ! -f "$FILE_PATH" ]]; then
-              echo "::error::Invalid file path provided to send_apk function."
-              return 1
-            fi
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+        
+        // Enable core library desugaring for newer Java 8+ APIs on older Android versions
+        isCoreLibraryDesugaringEnabled = true
+    }
+    
+    kotlinOptions {
+        jvmTarget = "11"
+        
+        // Kotlin compiler optimizations
+        freeCompilerArgs += listOf(
+            "-opt-in=kotlin.RequiresOptIn",
+            "-Xjsr305=strict",
+            "-Xskip-prerelease-check",
+            "-Xuse-experimental=kotlin.ExperimentalUnsignedTypes"
+        )
+    }
+    
+    buildFeatures {
+        compose = true
+        buildConfig = true
+        
+        // Disable unused features to reduce build time and APK size
+        aidl = false
+        renderScript = false
+        shaders = false
+    }
+    
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.8"
+    }
+    
+    packagingOptions {
+        // Exclude unnecessary files to reduce APK size
+        resources {
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/DEPENDENCIES",
+                "/META-INF/LICENSE",
+                "/META-INF/LICENSE.txt",
+                "/META-INF/license.txt",
+                "/META-INF/NOTICE",
+                "/META-INF/NOTICE.txt",
+                "/META-INF/notice.txt",
+                "/META-INF/ASL2.0",
+                "/META-INF/*.kotlin_module",
+                "**/attach_hotspot_windows.dll",
+                "META-INF/licenses/**",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1"
+            )
+        }
+        
+        // Merge duplicate files
+        pickFirsts += setOf(
+            "**/*.so",
+            "**/libc++_shared.so",
+            "**/libjsc.so"
+        )
+    }
+    
+    // Lint configuration for cleaner builds
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+        disable += setOf("MissingTranslation", "ExtraTranslation")
+    }
+}
 
-            local FILE_NAME=$(basename "$FILE_PATH")
-            local FILE_SIZE=$(du -h "$FILE_PATH" | cut -f1)
-            local FILE_SIZE_BYTES=$(stat -c%s "$FILE_PATH")
-            local FILE_SIZE_MB=$((FILE_SIZE_BYTES / 1024 / 1024))
-            local NL=$'\n'
-            
-            # Create different icons and descriptions for release vs debug
-            local ICON="📦"
-            local TYPE_DESC="Universal"
-            if [[ "$FILE_NAME" == *"debug"* ]]; then
-              ICON="🔧"
-              TYPE_DESC="Debug Universal"
-            elif [[ "$FILE_NAME" == *"release"* ]]; then
-              ICON="🚀"
-              TYPE_DESC="Release Universal"
-            fi
-            
-            local CAPTION="${ICON} *${FILE_NAME}*${NL}📱 Type: *${TYPE_DESC} APK*${NL}🔖 Version: *${{ steps.build-info.outputs.version }}*${NL}📅 Built: *${{ steps.build-info.outputs.build-time }}*${NL}📏 Size: *${FILE_SIZE}* (${FILE_SIZE_MB} MB)${NL}🏗️ Architecture: *Universal (all devices)*${NL}✨ Optimized with R8 & ProGuard"
+dependencies {
+    // Core library desugaring
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    
+    // Core Android dependencies
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.activity.compose)
+    
+    // Compose BOM and dependencies
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    
+    // Test dependencies
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    
+    // Debug dependencies
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
+    
+    // Room database (optimized versions)
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
+    
+    // Coroutines (optimized)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+    
+    // WorkManager
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    
+    // Networking (optimized versions)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+    
+    // Google Play Services
+    implementation("com.google.android.gms:play-services-location:21.1.0")
+    
+    // Lifecycle
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    
+    // Activity and Fragment KTX
+    implementation("androidx.activity:activity-ktx:1.8.2")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
+}
 
-            echo "::notice::Sending ${FILE_NAME} (${FILE_SIZE}) to Telegram..."
-            
-            # Test the bot token first
-            TEST_RESPONSE=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe")
-            if ! echo "$TEST_RESPONSE" | grep -q '"ok":true'; then
-              echo "::error title=Telegram Config Error::Invalid bot token. Response: $TEST_RESPONSE"
-              return 1
-            fi
-            
-            # Check file size limit (50MB for Telegram Bot API)
-            if [ "$FILE_SIZE_BYTES" -gt 52428800 ]; then
-              echo "::warning title=File Too Large::${FILE_NAME} is ${FILE_SIZE} (${FILE_SIZE_MB} MB), exceeding Telegram's 50MB limit. Skipping..."
-              return 0
-            fi
-            
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-              -F chat_id="${TELEGRAM_CHAT_ID}" \
-              -F document=@"$FILE_PATH" \
-              -F caption="$CAPTION" \
-              -F parse_mode=Markdown \
-              --connect-timeout 30 \
-              --max-time 300)
-            
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            BODY=$(echo "$RESPONSE" | head -n -1)
+// Gradle task optimizations
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    kotlinOptions {
+        jvmTarget = "11"
+        
+        // Kotlin compiler optimizations
+        freeCompilerArgs += listOf(
+            "-Xopt-in=kotlin.RequiresOptIn",
+            "-Xjsr305=strict"
+        )
+    }
+}
 
-            if [ "$HTTP_CODE" -eq 200 ]; then
-              echo "::notice title=Telegram Success::✅ Successfully sent ${FILE_NAME}"
-            else
-              echo "::error title=Telegram Failed::❌ Failed to send ${FILE_NAME} (HTTP $HTTP_CODE)"
-              echo "Response body: $BODY"
-              
-              # Provide helpful error messages
-              if [ "$HTTP_CODE" -eq 404 ]; then
-                echo "::error::HTTP 404 usually means invalid bot token or the bot can't access the chat."
-                echo "::error::Make sure your bot token is correct and the bot has been added to the chat."
-              elif [ "$HTTP_CODE" -eq 403 ]; then
-                echo "::error::HTTP 403 means the bot doesn't have permission to send messages to this chat."
-                echo "::error::Make sure the bot is added to the chat and has send message permissions."
-              elif [ "$HTTP_CODE" -eq 400 ]; then
-                echo "::error::HTTP 400 might indicate file is too large or invalid chat ID."
-              fi
-              return 1
-            fi
-          }
-          
-          echo "Searching for Universal APKs to send..."
-          
-          # Send Release APKs first
-          if [ -n "${{ steps.verify-apks.outputs.release_path }}" ]; then
-            echo "📤 Sending Release APKs..."
-            for apk_file in "${{ steps.verify-apks.outputs.release_path }}"/*.apk; do
-              if [ -f "$apk_file" ]; then
-                send_apk "$apk_file" "release"
-              fi
-            done
-          fi
-          
-          # Send Debug APKs
-          if [ -n "${{ steps.verify-apks.outputs.debug_path }}" ]; then
-            echo "📤 Sending Debug APKs..."
-            for apk_file in "${{ steps.verify-apks.outputs.debug_path }}"/*.apk; do
-              if [ -f "$apk_file" ]; then
-                send_apk "$apk_file" "debug"
-              fi
-            done
-          fi
-          
-          # Send summary message
-          TOTAL_APKS=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | wc -l)
-          SUMMARY_MESSAGE="🎉 *Build Complete!*%0A%0A📦 Successfully built and released *${TOTAL_APKS} Universal APKs*%0A🔖 Version: *${{ steps.build-info.outputs.version }}*%0A📅 Build Time: *${{ steps.build-info.outputs.build-time }}*%0A🏗️ Architecture: *Universal (compatible with all devices)*%0A✨ Optimizations: *R8, ProGuard, Bundle size reduction*%0A%0A🔗 [View Release on GitHub](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})"
-          
-          curl -s -X POST \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="$SUMMARY_MESSAGE" \
-            -d parse_mode=Markdown \
-            -d disable_web_page_preview=false > /dev/null
-          
-          echo "::notice title=Telegram Complete::📱 All Universal APKs sent to Telegram successfully!"
-          echo "::endgroup::"
+// Custom task to print APK information
+tasks.register("printApkInfo") {
+    doLast {
+        val apkDir = File(project.buildDir, "outputs/apk")
+        if (apkDir.exists()) {
+            apkDir.walkTopDown().filter { it.extension == "apk" }.forEach { apk ->
+                println("APK: ${apk.name}")
+                println("Size: ${apk.length() / 1024 / 1024} MB")
+                println("Path: ${apk.absolutePath}")
+                println("---")
+            }
+        }
+    }
+}
+
+// Ensure printApkInfo runs after assembly
+tasks.whenTaskAdded {
+    if (name.startsWith("assemble")) {
+        finalizedBy("printApkInfo")
+    }
+}

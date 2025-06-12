@@ -1,5 +1,4 @@
-# release.yml
-name: Build & Release APK
+name: Build & Release Universal APKs
 
 on:
   push:
@@ -10,11 +9,11 @@ env:
   # Using a modern JDK like 17 is recommended for running Gradle itself.
   # This is compatible with your project's target of Java 11.
   JAVA_VERSION: '17'
-  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Xmx4g -XX:MaxMetaspaceSize=512m
 
 jobs:
   build-and-release:
-    name: Build & Release APK
+    name: Build & Release Universal APKs
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -47,38 +46,36 @@ jobs:
       - name: 🔐 Grant Gradle Execution Permissions
         run: chmod +x ./gradlew
 
-      # Add debugging step to check splits configuration
-      - name: 🔍 Debug Gradle Configuration
+      - name: 🔨 Build Universal Release & Debug APKs
         run: |
-          echo "::group::Checking Gradle configuration"
-          ./gradlew help --task :app:assembleRelease
-          echo "::endgroup::"
-          
-          echo "::group::Checking splits configuration"
-          ./gradlew :app:tasks --all | grep -i split || echo "No split tasks found"
+          echo "::group::Building Universal APK files"
+          ./gradlew assembleRelease assembleDebug \
+            --stacktrace \
+            --no-daemon \
+            --parallel \
+            --build-cache \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m" \
+            -Dkotlin.compiler.execution.strategy=in-process \
+            -Dkotlin.incremental=false
           echo "::endgroup::"
 
-      - name: 🔨 Build Release & Debug APKs
-        run: |
-          echo "::group::Building APK files with verbose output"
-          ./gradlew assembleRelease assembleDebug --info --stacktrace
-          echo "::endgroup::"
-
-      - name: 🔎 Verify APK Generation (Enhanced)
+      - name: 🔎 Verify APK Generation
         id: verify-apks
         run: |
           RELEASE_APKS_PATH="app/build/outputs/apk/release"
           DEBUG_APKS_PATH="app/build/outputs/apk/debug"
           
-          echo "::group::Complete APK directory structure"
-          find app/build/outputs -type f -name "*.apk" -exec ls -la {} \; || echo "No APKs found"
-          echo "::endgroup::"
-          
           echo "::group::Verifying Generated APK files"
           if [ -d "$RELEASE_APKS_PATH" ]; then
             echo "Release APKs found:"
-            ls -lR "$RELEASE_APKS_PATH"
+            ls -la "$RELEASE_APKS_PATH"/*.apk
             echo "release_path=$RELEASE_APKS_PATH" >> $GITHUB_OUTPUT
+            # Get release APK info
+            RELEASE_APK=$(find "$RELEASE_APKS_PATH" -name "*.apk" -type f | head -1)
+            if [ -n "$RELEASE_APK" ]; then
+              echo "release_apk=$RELEASE_APK" >> $GITHUB_OUTPUT
+              echo "release_size=$(du -h "$RELEASE_APK" | cut -f1)" >> $GITHUB_OUTPUT
+            fi
           else
             echo "::warning::Release APK directory not found."
             echo "release_path=" >> $GITHUB_OUTPUT
@@ -86,8 +83,14 @@ jobs:
           
           if [ -d "$DEBUG_APKS_PATH" ]; then
             echo "Debug APKs found:"
-            ls -lR "$DEBUG_APKS_PATH"
+            ls -la "$DEBUG_APKS_PATH"/*.apk
             echo "debug_path=$DEBUG_APKS_PATH" >> $GITHUB_OUTPUT
+            # Get debug APK info
+            DEBUG_APK=$(find "$DEBUG_APKS_PATH" -name "*.apk" -type f | head -1)
+            if [ -n "$DEBUG_APK" ]; then
+              echo "debug_apk=$DEBUG_APK" >> $GITHUB_OUTPUT
+              echo "debug_size=$(du -h "$DEBUG_APK" | cut -f1)" >> $GITHUB_OUTPUT
+            fi
           else
             echo "::warning::Debug APK directory not found."
             echo "debug_path=" >> $GITHUB_OUTPUT
@@ -100,14 +103,6 @@ jobs:
           fi
           
           echo "::notice title=Build Success::$APK_COUNT APK files generated successfully."
-          
-          # Check if splits were actually generated
-          SPLIT_COUNT=$(find app/build/outputs/apk -name "*-arm64-v8a*.apk" -o -name "*-armeabi-v7a*.apk" -o -name "*-x86_64*.apk" 2>/dev/null | wc -l)
-          if [ "$SPLIT_COUNT" -gt 0 ]; then
-            echo "::notice title=Splits Success::$SPLIT_COUNT split APKs generated."
-          else
-            echo "::warning title=No Splits::No architecture-specific APKs found. Universal APKs may have been generated instead."
-          fi
           echo "::endgroup::"
 
       - name: 📤 Upload APKs to GitHub Release
@@ -118,53 +113,156 @@ jobs:
             ${{ steps.verify-apks.outputs.debug_path }}/*.apk
           fail_on_unmatched_files: false
           generate_release_notes: true
+          body: |
+            ## 📱 APK Downloads
+            
+            ### Release APK
+            - **Size**: ${{ steps.verify-apks.outputs.release_size }}
+            - **Architecture**: Universal (all architectures)
+            - **Build Type**: Release (optimized)
+            
+            ### Debug APK  
+            - **Size**: ${{ steps.verify-apks.outputs.debug_size }}
+            - **Architecture**: Universal (all architectures)
+            - **Build Type**: Debug (with debugging info)
+            
+            ---
+            **Build Info:**
+            - Version: ${{ steps.build-info.outputs.version }}
+            - Built: ${{ steps.build-info.outputs.build-time }}
+            - Commit: ${{ github.sha }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📱 Send arm64 APKs to Telegram
-        if: success()
+      - name: 📱 Send APKs to Telegram
+        if: success() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != ''
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "::group::Sending arm64-v8a APKs to Telegram"
+          echo "::group::Sending APKs to Telegram"
+          
+          # Check if secrets are configured
+          if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+            echo "::warning::Telegram bot token or chat ID not configured. Skipping Telegram notification."
+            echo "::endgroup::"
+            exit 0
+          fi
           
           send_apk() {
             local FILE_PATH=$1
+            local BUILD_TYPE=$2
+            
             if [[ -z "$FILE_PATH" || ! -f "$FILE_PATH" ]]; then
               echo "::error::Invalid file path provided to send_apk function."
               return 1
             fi
 
             local FILE_NAME=$(basename "$FILE_PATH")
+            local FILE_SIZE=$(du -h "$FILE_PATH" | cut -f1)
+            local FILE_SIZE_BYTES=$(stat -c%s "$FILE_PATH")
+            local COMMIT_SHORT="${{ github.sha }}"
+            local COMMIT_SHORT="${COMMIT_SHORT:0:7}"
             local NL=$'\n'
-            local CAPTION="📦 *${FILE_NAME}*${NL}🔖 Version: *${{ steps.build-info.outputs.version }}*${NL}📅 Built: *${{ steps.build-info.outputs.build-time }}*"
+            
+            # Enhanced caption with more details
+            local CAPTION="📱 *${FILE_NAME}*${NL}${NL}"
+            CAPTION+="🏷️ **Version:** \`${{ steps.build-info.outputs.version }}\`${NL}"
+            CAPTION+="🔨 **Build Type:** \`${BUILD_TYPE}\`${NL}"
+            CAPTION+="🏗️ **Architecture:** \`Universal\`${NL}"
+            CAPTION+="📏 **Size:** \`${FILE_SIZE} (${FILE_SIZE_BYTES} bytes)\`${NL}"
+            CAPTION+="📅 **Built:** \`${{ steps.build-info.outputs.build-time }}\`${NL}"
+            CAPTION+="🔗 **Commit:** \`${COMMIT_SHORT}\`${NL}"
+            CAPTION+="⚡ **Optimized:** $([ "$BUILD_TYPE" = "Release" ] && echo "✅ Yes" || echo "❌ Debug")${NL}${NL}"
+            CAPTION+="📥 **Download from release page or install directly!**"
 
-            echo "::notice::Sending ${FILE_NAME} to Telegram..."
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" -F chat_id="${TELEGRAM_CHAT_ID}" -F document=@"$FILE_PATH" -F caption="$CAPTION" -F parse_mode=Markdown)
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-
-            if [ "$HTTP_CODE" -eq 200 ]; then
-              echo "::notice title=Telegram Success::✅ Successfully sent ${FILE_NAME}"
-            else
-              BODY=$(echo "$RESPONSE" | head -n -1)
-              echo "::error title=Telegram Failed::❌ Failed to send ${FILE_NAME} (HTTP $HTTP_CODE). Response: $BODY"
+            echo "::notice::Sending ${FILE_NAME} (${FILE_SIZE}) to Telegram..."
+            
+            # Test the bot token first
+            TEST_RESPONSE=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe")
+            if ! echo "$TEST_RESPONSE" | grep -q '"ok":true'; then
+              echo "::error title=Telegram Config Error::Invalid bot token. Response: $TEST_RESPONSE"
+              return 1
             fi
+            
+            # Send with retry mechanism
+            local MAX_RETRIES=3
+            local RETRY_COUNT=0
+            local SUCCESS=false
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = "false" ]; do
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "::notice::Attempt $RETRY_COUNT of $MAX_RETRIES..."
+              
+              RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+                "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+                -F chat_id="${TELEGRAM_CHAT_ID}" \
+                -F document=@"$FILE_PATH" \
+                -F caption="$CAPTION" \
+                -F parse_mode=Markdown \
+                -F disable_notification=false \
+                --connect-timeout 30 \
+                --max-time 300)
+              
+              HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+              BODY=$(echo "$RESPONSE" | head -n -1)
+
+              if [ "$HTTP_CODE" -eq 200 ]; then
+                echo "::notice title=Telegram Success::✅ Successfully sent ${FILE_NAME}"
+                SUCCESS=true
+              else
+                echo "::warning title=Telegram Retry::❌ Failed to send ${FILE_NAME} (HTTP $HTTP_CODE) - Attempt $RETRY_COUNT"
+                
+                if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                  echo "::error title=Telegram Failed::❌ Failed to send ${FILE_NAME} after $MAX_RETRIES attempts (HTTP $HTTP_CODE)"
+                  echo "Response body: $BODY"
+                  
+                  # Provide helpful error messages
+                  case $HTTP_CODE in
+                    404)
+                      echo "::error::HTTP 404 usually means invalid bot token or the bot can't access the chat."
+                      echo "::error::Make sure your bot token is correct and the bot has been added to the chat."
+                      ;;
+                    403)
+                      echo "::error::HTTP 403 means the bot doesn't have permission to send messages to this chat."
+                      echo "::error::Make sure the bot is added to the chat and has send message permissions."
+                      ;;
+                    413)
+                      echo "::error::HTTP 413 means the file is too large. Telegram has a 50MB limit for bots."
+                      ;;
+                    429)
+                      echo "::error::HTTP 429 means rate limited. The bot is sending too many requests."
+                      ;;
+                    *)
+                      echo "::error::Unexpected HTTP error code: $HTTP_CODE"
+                      ;;
+                  esac
+                else
+                  sleep 5  # Wait before retry
+                fi
+              fi
+            done
           }
           
-          echo "Searching for arm64-v8a APKs to send..."
-          
-          # Search in both release and debug paths, and also search for any APK with arm64-v8a in the name
-          find app/build/outputs/apk -type f \( -name "*arm64-v8a*.apk" -o -name "*-arm64*.apk" \) 2>/dev/null | while IFS= read -r apk_file; do
-            send_apk "$apk_file"
-          done
-          
-          # If no architecture-specific APKs found, send universal APKs as fallback
-          if [ $(find app/build/outputs/apk -type f \( -name "*arm64-v8a*.apk" -o -name "*-arm64*.apk" \) 2>/dev/null | wc -l) -eq 0 ]; then
-            echo "::warning::No arm64-v8a specific APKs found, sending universal APKs instead..."
-            find app/build/outputs/apk -type f -name "*.apk" 2>/dev/null | while IFS= read -r apk_file; do
-              send_apk "$apk_file"
-            done
+          # Send both APKs if they exist
+          if [ -n "${{ steps.verify-apks.outputs.release_apk }}" ]; then
+            echo "Sending Release APK..."
+            send_apk "${{ steps.verify-apks.outputs.release_apk }}" "Release"
           fi
           
+          if [ -n "${{ steps.verify-apks.outputs.debug_apk }}" ]; then
+            echo "Sending Debug APK..."
+            send_apk "${{ steps.verify-apks.outputs.debug_apk }}" "Debug"
+          fi
+          
+          echo "::endgroup::"
+
+      - name: 📊 Build Summary
+        if: always()
+        run: |
+          echo "::group::Build Summary"
+          echo "✅ Build completed for version ${{ steps.build-info.outputs.version }}"
+          echo "📦 Release APK: ${{ steps.verify-apks.outputs.release_size }}"
+          echo "🐛 Debug APK: ${{ steps.verify-apks.outputs.debug_size }}"
+          echo "🕐 Build time: ${{ steps.build-info.outputs.build-time }}"
           echo "::endgroup::"
