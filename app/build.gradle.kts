@@ -31,9 +31,6 @@ android {
         
         // Bundle size reduction configurations
         vectorDrawables.useSupportLibrary = true
-        
-        // Optimize for smaller APK size
-        resConfigs("en", "xxhdpi")
     }
 
     buildTypes {
@@ -49,7 +46,6 @@ android {
             // Additional optimizations for release builds
             isDebuggable = false
             isJniDebuggable = false
-            isRenderscriptDebuggable = false
             isPseudoLocalesEnabled = false
             
             // Enable all optimizations
@@ -59,8 +55,8 @@ android {
         }
         debug {
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             isDebuggable = true
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
@@ -73,10 +69,7 @@ android {
             // Disable ABI splits to create universal APK
             isEnable = false
         }
-        density {
-            // Disable density splits to create universal APK
-            isEnable = false
-        }
+        // Note: density splits are deprecated and removed
     }
 
     // Bundle size optimization
@@ -103,16 +96,12 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
     
-    kotlinOptions {
-        jvmTarget = "11"
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
         
-        // Kotlin compiler optimizations
-        freeCompilerArgs += listOf(
-            "-opt-in=kotlin.RequiresOptIn",
-            "-Xjsr305=strict",
-            "-Xskip-prerelease-check",
-            "-Xuse-experimental=kotlin.ExperimentalUnsignedTypes"
-        )
+        // Enable core library desugaring for newer Java 8+ APIs on older Android versions
+        isCoreLibraryDesugaringEnabled = true
     }
     
     buildFeatures {
@@ -156,6 +145,12 @@ android {
             "**/libc++_shared.so",
             "**/libjsc.so"
         )
+    }
+    
+    // Add modern resource configuration
+    androidResources {
+        localeFilters += listOf("en")
+        noCompress += listOf("tflite", "lite", "bin")
     }
     
     // Lint configuration for cleaner builds
@@ -222,14 +217,14 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.6.2")
 }
 
-// Gradle task optimizations
+// Gradle task optimizations - Use modern compilerOptions instead of kotlinOptions
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-    kotlinOptions {
-        jvmTarget = "11"
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
         
         // Kotlin compiler optimizations
-        freeCompilerArgs += listOf(
-            "-Xopt-in=kotlin.RequiresOptIn",
+        freeCompilerArgs.addAll(
+            "-opt-in=kotlin.RequiresOptIn",
             "-Xjsr305=strict"
         )
     }
@@ -238,7 +233,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 // Custom task to print APK information
 tasks.register("printApkInfo") {
     doLast {
-        val apkDir = File(project.buildDir, "outputs/apk")
+        val apkDir = File(project.layout.buildDirectory.asFile.get(), "outputs/apk")
         if (apkDir.exists()) {
             apkDir.walkTopDown().filter { it.extension == "apk" }.forEach { apk ->
                 println("APK: ${apk.name}")
