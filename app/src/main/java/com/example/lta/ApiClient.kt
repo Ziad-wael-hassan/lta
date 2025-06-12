@@ -92,7 +92,7 @@ class ApiClient(private val baseUrl: String) {
      */
     suspend fun uploadFile(file: File, caption: String): Boolean {
         return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/upload-data"
+            val url = "$baseUrl/api/upload-data"
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("caption", caption)
