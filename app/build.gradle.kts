@@ -1,8 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    // CORRECT way to apply the Compose plugin in the app module
-    id("org.jetbrains.kotlin.plugin.compose")
+    alias(libs.plugins.kotlin.compose)
     kotlin("kapt")
     alias(libs.plugins.google.services)
 }

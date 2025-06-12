@@ -38,5 +38,5 @@ firebase-analytics-ktx = { group = "com.google.firebase", name = "firebase-analy
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
-# The kotlin-compose plugin alias is REMOVED from here.
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
