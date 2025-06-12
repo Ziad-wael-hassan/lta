@@ -62,6 +62,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
         isCoreLibraryDesugaringEnabled = true
     }
+    
+    kotlinOptions {
+        jvmTarget = "11"
+    }
 
     buildFeatures {
         compose = true
