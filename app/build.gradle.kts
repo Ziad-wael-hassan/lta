@@ -77,7 +77,7 @@ android {
 
     composeOptions {
         // This version should match the Kotlin version for best results
-        kotlinCompilerExtensionVersion = "1.5.8" // For Kotlin 1.9.23
+        kotlinCompilerExtensionVersion = "1.5.10"
     }
 
     packaging {
