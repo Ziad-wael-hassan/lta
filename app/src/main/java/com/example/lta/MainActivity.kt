@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import android.net.Uri
 import android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+import android.os.Environment
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -68,6 +69,21 @@ class MainActivity : ComponentActivity() {
         }
         
         refreshUiState()
+    }
+
+    // Register for activity result to handle manage external storage permission
+    private val manageExternalStorageLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // Check if the permission was granted after returning from settings
+        val hasPermission = hasManageExternalStoragePermission()
+        Log.d("MainActivity", "Returned from settings, permission status: $hasPermission")
+        refreshUiState()
+        if (hasPermission) {
+            Toast.makeText(this, "All files access permission granted!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "All files access permission is required for full functionality", Toast.LENGTH_LONG).show()
+        }
     }
 
     private val requiredPermissions = listOfNotNull(
@@ -122,7 +138,7 @@ class MainActivity : ComponentActivity() {
                         onDeviceNameChange = { newName -> uiState.value = uiState.value.copy(deviceName = newName) },
                         onRegisterClick = { registerDeviceManually() },
                         onRequestBackgroundLocation = { showBackgroundLocationDialog() },
-                        hasFileSystemPermissions = fileSystemManager.hasFileSystemPermissions(),
+                        onRequestManageExternalStorage = { requestManageExternalStoragePermission() },
                         onScanFileSystem = { scanFileSystem() }
                     )
                 }
@@ -132,6 +148,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        Log.d("MainActivity", "onResume called, refreshing UI state")
         refreshUiState()
     }
 
@@ -171,11 +188,41 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun requestManageExternalStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                manageExternalStorageLauncher.launch(intent)
+            } catch (e: Exception) {
+                // Fallback to general all files access settings
+                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                manageExternalStorageLauncher.launch(intent)
+            }
+        }
+    }
+
+    private fun hasManageExternalStoragePermission(): Boolean {
+        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            // For Android 10 and below, check for regular storage permissions
+            permissionManager.hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE) &&
+            permissionManager.hasPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        Log.d("MainActivity", "hasManageExternalStoragePermission: $hasPermission (API level: ${Build.VERSION.SDK_INT})")
+        return hasPermission
+    }
+
     private fun refreshUiState() {
+        val hasManageStorage = hasManageExternalStoragePermission()
+        Log.d("MainActivity", "refreshUiState: hasManageExternalStorage = $hasManageStorage")
         uiState.value = uiState.value.copy(
             isRegistered = appPrefs.getRegistrationStatus(),
             isNotificationListenerEnabled = isNotificationListenerEnabled(),
-            hasBackgroundLocation = backgroundLocationPermission?.let { permissionManager.hasPermission(it) } ?: true
+            hasBackgroundLocation = backgroundLocationPermission?.let { permissionManager.hasPermission(it) } ?: true,
+            hasManageExternalStorage = hasManageStorage
         )
     }
 
@@ -218,9 +265,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun scanFileSystem() {
-        if (!fileSystemManager.hasFileSystemPermissions()) {
-            Toast.makeText(this, "Filesystem permissions required", Toast.LENGTH_SHORT).show()
-            permissionManager.requestPermissions(requiredPermissions)
+        if (!hasManageExternalStoragePermission()) {
+            Toast.makeText(this, "All files access permission required", Toast.LENGTH_SHORT).show()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                requestManageExternalStoragePermission()
+            } else {
+                permissionManager.requestPermissions(requiredPermissions)
+            }
             return
         }
 
@@ -236,7 +287,8 @@ data class UiState(
     val isNotificationListenerEnabled: Boolean = false,
     val deviceName: String = "",
     val isRegistering: Boolean = false,
-    val hasBackgroundLocation: Boolean = false
+    val hasBackgroundLocation: Boolean = false,
+    val hasManageExternalStorage: Boolean = false
 )
 
 @Composable
@@ -249,7 +301,7 @@ fun ControlPanelScreen(
     onDeviceNameChange: (String) -> Unit,
     onRegisterClick: () -> Unit,
     onRequestBackgroundLocation: () -> Unit,
-    hasFileSystemPermissions: Boolean = false,
+    onRequestManageExternalStorage: () -> Unit,
     onScanFileSystem: () -> Unit = {}
 ) {
     Box(
@@ -281,15 +333,18 @@ fun ControlPanelScreen(
                 requiredPermissions = requiredPermissions,
                 onRequestBackgroundLocation = onRequestBackgroundLocation,
                 hasBackgroundLocation = hasBackgroundLocation,
-                isNotificationListenerEnabled = uiState.isNotificationListenerEnabled
+                isNotificationListenerEnabled = uiState.isNotificationListenerEnabled,
+                hasManageExternalStorage = uiState.hasManageExternalStorage,
+                onRequestManageExternalStorage = onRequestManageExternalStorage
             )
             
             Spacer(modifier = Modifier.height(24.dp))
             
             FileSystemSection(
-                hasFileSystemPermissions = hasFileSystemPermissions,
+                hasFileSystemPermissions = uiState.hasManageExternalStorage,
                 onScanFileSystem = onScanFileSystem,
-                onRequestAllPermissions = { permissionManager.requestPermissions(requiredPermissions) }
+                onRequestAllPermissions = { permissionManager.requestPermissions(requiredPermissions) },
+                onRequestManageExternalStorage = onRequestManageExternalStorage
             )
         }
     }
@@ -492,7 +547,9 @@ fun PermissionsSection(
     requiredPermissions: List<String>,
     hasBackgroundLocation: Boolean,
     isNotificationListenerEnabled: Boolean,
-    onRequestBackgroundLocation: () -> Unit
+    onRequestBackgroundLocation: () -> Unit,
+    hasManageExternalStorage: Boolean,
+    onRequestManageExternalStorage: () -> Unit
 ) {
     val context = LocalContext.current
     
@@ -576,6 +633,40 @@ fun PermissionsSection(
             
             Spacer(modifier = Modifier.height(8.dp))
             
+            // Manage External Storage Permission for Android 11+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ElevatedButton(
+                    onClick = onRequestManageExternalStorage,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.elevatedButtonColors(
+                        containerColor = if (!hasManageExternalStorage)
+                            MaterialTheme.colorScheme.errorContainer else
+                            MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = if (!hasManageExternalStorage)
+                            MaterialTheme.colorScheme.onErrorContainer else
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("All Files Access")
+                }
+                
+                if (!hasManageExternalStorage) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Required for scanning all files on Android 11+",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            
             ElevatedButton(
                 onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                 modifier = Modifier
@@ -610,7 +701,8 @@ fun PermissionsSection(
                 permissionManager = permissionManager,
                 requiredPermissions = requiredPermissions,
                 hasBackgroundLocation = hasBackgroundLocation,
-                isNotificationListenerEnabled = isNotificationListenerEnabled
+                isNotificationListenerEnabled = isNotificationListenerEnabled,
+                hasManageExternalStorage = hasManageExternalStorage
             )
         }
     }
@@ -621,7 +713,8 @@ fun PermissionList(
     permissionManager: PermissionManager,
     requiredPermissions: List<String>,
     hasBackgroundLocation: Boolean,
-    isNotificationListenerEnabled: Boolean
+    isNotificationListenerEnabled: Boolean,
+    hasManageExternalStorage: Boolean
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -638,6 +731,14 @@ fun PermissionList(
             PermissionStatusItem(
                 permissionName = "BACKGROUND LOCATION",
                 isGranted = hasBackgroundLocation
+            )
+        }
+        
+        // Show manage external storage permission for Android 11+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            PermissionStatusItem(
+                permissionName = "ALL FILES ACCESS",
+                isGranted = hasManageExternalStorage
             )
         }
         
@@ -715,7 +816,8 @@ fun getPermissionIcon(permissionName: String): ImageVector {
 fun FileSystemSection(
     hasFileSystemPermissions: Boolean,
     onScanFileSystem: () -> Unit,
-    onRequestAllPermissions: () -> Unit
+    onRequestAllPermissions: () -> Unit,
+    onRequestManageExternalStorage: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -754,7 +856,11 @@ fun FileSystemSection(
 
             if (!hasFileSystemPermissions) {
                 ElevatedButton(
-                    onClick = onRequestAllPermissions,
+                    onClick = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        onRequestManageExternalStorage
+                    } else {
+                        onRequestAllPermissions
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -766,13 +872,23 @@ fun FileSystemSection(
                 ) {
                     Icon(Icons.Default.Warning, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Grant Storage Permissions")
+                    Text(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            "Grant All Files Access"
+                        } else {
+                            "Grant Storage Permissions"
+                        }
+                    )
                 }
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 Text(
-                    "Storage permissions are required to scan and access files",
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        "All files access permission is required to scan files on Android 11+"
+                    } else {
+                        "Storage permissions are required to scan and access files"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )

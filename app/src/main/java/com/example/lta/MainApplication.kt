@@ -28,6 +28,7 @@ class MainApplication : Application(), Configuration.Provider {
         const val LOCATION_CHANNEL_ID = "location_service_channel"
         const val NOTIFICATION_CHANNEL_ID = "notifications_channel"
         private const val TOKEN_CHECK_INTERVAL_HOURS = 24L
+        const val TOKEN_MONITOR_WORK_NAME = "token_monitor_work"
     }
 
     override fun onCreate() {
@@ -104,24 +105,16 @@ class MainApplication : Application(), Configuration.Provider {
         ).build()
         
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-            TokenMonitorService.TOKEN_MONITOR_WORK_NAME,
+            TOKEN_MONITOR_WORK_NAME,
             ExistingPeriodicWorkPolicy.KEEP,
             tokenCheckWork
         )
         
-        // Also start the monitoring service
-        try {
-            val intent = Intent(applicationContext, TokenMonitorService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-        } catch (e: Exception) {
-            Log.e("MainApplication", "Error starting token monitor service", e)
-        }
+        // Remove the service startup to avoid ForegroundServiceStartNotAllowedException
+        // The WorkManager will handle the token monitoring reliably
+        // No need to start a foreground service from Application context
         
-        Log.i("MainApplication", "Token monitoring initialized")
+        Log.i("MainApplication", "Token monitoring initialized with WorkManager")
     }
 
     /**

@@ -5,6 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 
 /**
  * BroadcastReceiver that listens for system boot and app reinstall events.
@@ -17,6 +21,7 @@ class BootReceiver : BroadcastReceiver() {
         private const val TAG = "BootReceiver"
         // HTC's quick boot intent action (commonly used by various OEMs)
         private const val ACTION_QUICKBOOT_POWERON = "android.intent.action.QUICKBOOT_POWERON"
+        private const val TOKEN_CHECK_INTERVAL_HOURS = 24L
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -34,15 +39,18 @@ class BootReceiver : BroadcastReceiver() {
 
     private fun startServices(context: Context) {
         try {
-            Log.d(TAG, "Starting token monitor service")
+            Log.d(TAG, "Starting token monitoring with WorkManager")
             
-            // Start token monitor service
-            val serviceIntent = Intent(context, TokenMonitorService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
-            }
+            // Start token monitoring using WorkManager instead of foreground service
+            val tokenCheckWork = PeriodicWorkRequestBuilder<TokenCheckWorker>(
+                TOKEN_CHECK_INTERVAL_HOURS, TimeUnit.HOURS
+            ).build()
+            
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                MainApplication.TOKEN_MONITOR_WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                tokenCheckWork
+            )
             
             // Also check if we need to re-register the device
             val appPrefs = AppPreferences(context)

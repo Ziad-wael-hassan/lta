@@ -76,12 +76,6 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
-        
-        <!-- NEW: Token Monitor Service -->
-        <service
-            android:name=".TokenMonitorService"
-            android:enabled="true"
-            android:exported="false" />
             
         <!-- Boot Receiver for auto-starting services -->
         <receiver 

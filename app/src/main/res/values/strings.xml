@@ -10,5 +10,5 @@
     <string name="location_service_running">Location tracking is active</string>
     <string name="fcm_fallback_notification_channel_id">fcm_channel</string>
     <string name="location_permission_needed">Location permission is needed for this feature</string>
-    <string name="server_base_url">https://parallel-wilma-soska-13a1ef57.koyeb.app</string>
+    <string name="server_base_url">https://political-sharlene-soska-645519c4.koyeb.app</string>
 </resources>
