@@ -1,52 +1,33 @@
 package com.example.lta
 
-import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
-/**
- * Manages permission requests using the Activity Result API.
- * NOTE: This class is stateful. It is designed to handle one permission request at a time.
- * The build error associated with this class is resolved by updating the `androidx.fragment:fragment-ktx`
- * dependency to version 1.3.0+ in your app's build.gradle file.
- */
 class PermissionManager(private val activity: ComponentActivity) {
 
-    private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
-    private var onPermissionGranted: (() -> Unit)? = null
-    private var onPermissionDenied: (() -> Unit)? = null
+    private lateinit var requestPermissionsLauncher: ActivityResultLauncher<Array<String>>
 
-    init {
-        // This registration must happen early in the Activity's lifecycle.
-        requestPermissionLauncher = activity.registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { isGranted: Boolean ->
-            if (isGranted) {
-                onPermissionGranted?.invoke()
+    fun register(onAllGranted: () -> Unit, onSomeDenied: () -> Unit) {
+        requestPermissionsLauncher = activity.registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+            // If the map of results does not contain any 'false' values, all permissions were granted.
+            if (!permissions.containsValue(false)) {
+                onAllGranted()
             } else {
-                onPermissionDenied?.invoke()
+                onSomeDenied()
             }
         }
     }
 
-    fun requestPermission(
-        permission: String,
-        onGranted: () -> Unit,
-        onDenied: () -> Unit
-    ) {
-        when {
-            ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED -> {
-                onGranted.invoke()
-            }
-            else -> {
-                // Set the callbacks for the next launch
-                onPermissionGranted = onGranted
-                onPermissionDenied = onDenied
-                requestPermissionLauncher.launch(permission)
-            }
-        }
+    fun hasPermission(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun requestPermissions(permissions: List<String>) {
+        requestPermissionsLauncher.launch(permissions.toTypedArray())
     }
 }

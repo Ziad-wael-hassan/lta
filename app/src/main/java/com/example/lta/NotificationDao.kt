@@ -4,19 +4,22 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 
 @Dao
 interface NotificationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(notification: NotificationEntity)
 
-    @Query("SELECT * FROM notifications WHERE isSent = 0")
-    suspend fun getUnsentNotifications(): List<NotificationEntity>
+    // Unchanged: Gets all notifications that haven't been marked as sent.
+    // We'll use this to fetch notifications for our CSV export.
+    @Query("SELECT * FROM notifications")
+    suspend fun getAllNotifications(): List<NotificationEntity>
 
-    @Update
-    suspend fun update(notification: NotificationEntity)
+    // NEW: Deletes a list of notifications by their primary keys (IDs).
+    @Query("DELETE FROM notifications WHERE id IN (:notificationIds)")
+    suspend fun deleteByIds(notificationIds: List<Int>)
 
-    @Query("DELETE FROM notifications WHERE id = :notificationId")
-    suspend fun delete(notificationId: Int)
-} 
+    // This query can be removed as we now delete upon successful send.
+    // @Query("DELETE FROM notifications WHERE id = :notificationId")
+    // suspend fun delete(notificationId: Int)
+}

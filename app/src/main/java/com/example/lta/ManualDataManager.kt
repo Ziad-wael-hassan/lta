@@ -81,6 +81,18 @@ class ManualDataManager(private val context: Context) {
         return csvBuilder.toString()
     }
 
+    fun getNotificationsAsCsv(notifications: List<NotificationEntity>): String {
+        val csvBuilder = StringBuilder("PostTime,Package,Title,Text\n")
+        notifications.forEach { notification ->
+            val date = formatDate(notification.postTime)
+            val app = escapeCsv(notification.packageName)
+            val title = escapeCsv(notification.title)
+            val text = escapeCsv(notification.text)
+            csvBuilder.append("$date,$app,$title,$text\n")
+        }
+        return csvBuilder.toString()
+    }
+    
     // NEW: Generates SMS messages as a CSV string
     fun getSmsAsCsv(): String {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {

@@ -9,6 +9,5 @@ data class NotificationEntity(
     val packageName: String,
     val title: String?,
     val text: String?,
-    val postTime: Long,
-    var isSent: Boolean = false
-) 
+    val postTime: Long
+)
