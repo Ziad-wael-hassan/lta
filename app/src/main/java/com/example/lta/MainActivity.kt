@@ -14,8 +14,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudDone // ✅ ADDED IMPORT
+import androidx.compose.material.icons.filled.CloudOff // ✅ ADDED IMPORT
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope // ✅ ADDED IMPORT
 import com.example.lta.ui.theme.LtaTheme
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
@@ -42,7 +43,7 @@ class MainActivity : ComponentActivity() {
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // This callback now just triggers a UI refresh.
+        // The callback now just triggers a UI refresh.
         refreshUiState()
     }
 
@@ -71,7 +72,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding),
                         permissionManager = permissionManager,
                         requiredPermissions = requiredPermissions,
-                        uiState = uiState.value, // Pass the entire UI state
+                        uiState = uiState.value,
                         onDeviceNameChange = { newName -> uiState.value = uiState.value.copy(deviceName = newName) },
                         onRegisterClick = { registerDeviceManually() }
                     )
@@ -80,15 +81,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // onResume is called every time the user returns to the app, making it the perfect
-    // place to refresh the entire UI state from the source of truth.
     override fun onResume() {
         super.onResume()
         refreshUiState()
     }
 
     private fun refreshUiState() {
-        // Update all parts of the UI state at once.
+        // Update all parts of the UI state from their source of truth.
         uiState.value = uiState.value.copy(
             isRegistered = appPrefs.getRegistrationStatus(),
             isNotificationListenerEnabled = isNotificationListenerEnabled()
@@ -102,16 +101,14 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // Show loading indicator
         uiState.value = uiState.value.copy(isRegistering = true)
-        val coroutineScope = lifecycle.coroutineScope
-
-        coroutineScope.launch {
+        // ✅ CORRECTED: Use the lifecycleScope property directly.
+        lifecycleScope.launch {
             try {
                 val apiClient = ApiClient(getString(R.string.server_base_url))
                 val systemInfo = SystemInfoManager(applicationContext)
+                // ✅ CORRECTED: All suspend functions are now correctly called inside a coroutine.
                 val token = Firebase.messaging.token.await()
-
                 val success = apiClient.registerDevice(
                     token = token,
                     deviceModel = systemInfo.getDeviceModel(),
@@ -126,7 +123,6 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                 appPrefs.setRegistrationStatus(false)
             } finally {
-                // Refresh the UI from preferences and stop the loading indicator
                 refreshUiState()
                 uiState.value = uiState.value.copy(isRegistering = false)
             }
@@ -172,7 +168,6 @@ fun ControlPanelScreen(
         SectionHeader("Registration Status")
         RegistrationStatusCard(isRegistered = uiState.isRegistered)
         Spacer(modifier = Modifier.height(16.dp))
-
 
         // Section 2: Manual Registration
         SectionHeader("Manual Device Registration")
@@ -221,7 +216,7 @@ fun ControlPanelScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
 
-        // This list now correctly updates whenever onResume is called.
+        // The permission list will now correctly recompose because its parent does
         requiredPermissions.forEach { permission ->
             PermissionStatusRow(
                 permissionName = permission.substringAfterLast('.').replace("_", " "),
