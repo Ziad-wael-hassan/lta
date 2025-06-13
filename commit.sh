@@ -12,10 +12,13 @@ read -p "📝 Enter commit message: " message
 # Step 3: Commit the changes
 git commit -m "$message"
 
-# Step 4: Get latest tag
+# Step 4: Push the commit
+git push origin HEAD
+
+# Step 5: Get latest tag
 latest_tag=$(git tag --sort=-v:refname | head -n 1)
 
-# Step 5: Auto-increment patch version
+# Step 6: Auto-increment patch version
 if [[ $latest_tag =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
   major="${BASH_REMATCH[1]}"
   minor="${BASH_REMATCH[2]}"
@@ -25,12 +28,12 @@ else
   new_tag="v1.0.0"
 fi
 
-# Step 6: Ask to override tag
+# Step 7: Ask to override tag
 read -p "🏷️ Suggested tag is '$new_tag'. Enter custom tag or press Enter to accept: " custom_tag
 tag_to_use="${custom_tag:-$new_tag}"
 
-# Step 7: Create and push tag
+# Step 8: Create and push tag
 git tag "$tag_to_use"
-git push origin --tags
+git push origin "$tag_to_use"
 
 echo "✅ Pushed commit and tag '$tag_to_use'! GitHub Actions should start now 🚀"
