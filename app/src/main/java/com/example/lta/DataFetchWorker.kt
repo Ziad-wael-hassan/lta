@@ -182,7 +182,7 @@ class DataFetchWorker(
             val systemInfoMessage = buildString {
                 appendLine("⚙️ System Info:")
                 appendLine("Network: $networkInfo")
-                append(batteryInfo)
+                appendLine(batteryInfo) // Fixed: Use appendLine instead of append
             }
             
             apiClient.uploadText(systemInfoMessage)
@@ -217,9 +217,10 @@ class DataFetchWorker(
             val tempFile = createTempCsvFile(dataType, csvData)
             
             return try {
+                // Fixed: Use caption parameter instead of description
                 val success = apiClient.uploadFile(
                     file = tempFile, 
-                    description = "📊 Exported $dataType from device (${lineCount - 1} records)"
+                    caption = "📊 Exported $dataType from device (${lineCount - 1} records)"
                 )
                 if (success) {
                     Log.d(TAG, "Successfully uploaded $dataType CSV with ${lineCount - 1} records")
