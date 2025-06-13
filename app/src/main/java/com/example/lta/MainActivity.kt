@@ -252,8 +252,6 @@ fun ControlPanelScreen(
     hasFileSystemPermissions: Boolean = false,
     onScanFileSystem: () -> Unit = {}
 ) {
-    val context = LocalContext.current
-
     Box(
         modifier = modifier.fillMaxSize()
     ) {
@@ -436,7 +434,7 @@ fun RegistrationSection(
                 enabled = !isRegistering,
                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                 shape = RoundedCornerShape(12.dp),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
+                colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 )
@@ -606,7 +604,7 @@ fun PermissionsSection(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
             
-            Divider(modifier = Modifier.padding(bottom = 16.dp))
+            HorizontalDivider(modifier = Modifier.padding(bottom = 16.dp))
             
             PermissionList(
                 permissionManager = permissionManager,

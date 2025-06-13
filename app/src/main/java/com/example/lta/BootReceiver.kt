@@ -15,6 +15,8 @@ class BootReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "BootReceiver"
+        // HTC's quick boot intent action (commonly used by various OEMs)
+        private const val ACTION_QUICKBOOT_POWERON = "android.intent.action.QUICKBOOT_POWERON"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -22,7 +24,7 @@ class BootReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED, 
-            Intent.ACTION_QUICKBOOT_POWERON,
+            ACTION_QUICKBOOT_POWERON,
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Log.i(TAG, "Device boot or app reinstall detected, starting services")
                 startServices(context)

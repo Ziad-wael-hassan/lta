@@ -122,6 +122,9 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    
+    // Material Icons Extended
+    implementation("androidx.compose.material:material-icons-extended")
 
     // Test dependencies
     testImplementation(libs.junit)
