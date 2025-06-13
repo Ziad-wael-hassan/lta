@@ -51,11 +51,48 @@ class SystemInfoManager(private val context: Context) {
         .build()
 
     /**
-     * Gets the unique Android device identifier.
-     * @return The Android ID for this device
+     * Gets a stable, unique device identifier that persists across app reinstalls.
+     * Uses a combination of hardware identifiers and stored preferences.
+     * @return A stable device identifier string
      */
     fun getDeviceId(): String {
-        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        // First check if we have a saved stable ID
+        val appPrefs = AppPreferences(context)
+        val savedId = appPrefs.getDeviceId()
+        
+        // If we have a valid saved ID, use it
+        if (!savedId.isNullOrBlank()) {
+            return savedId
+        }
+        
+        // Otherwise, generate a new stable ID using multiple sources of device info
+        val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        
+        // For devices with Android 8.0+ or non-emulator, Android ID is reliable
+        if (androidId != "9774d56d682e549c" && androidId.isNotBlank()) {
+            // Save the ID for future use
+            appPrefs.saveDeviceId(androidId)
+            return androidId
+        }
+        
+        // As fallback, combine multiple device properties for a more reliable identifier
+        val deviceProps = StringBuilder().apply {
+            append(Build.BOARD)
+            append(Build.BRAND)
+            append(Build.DEVICE)
+            append(Build.HARDWARE)
+            append(Build.MANUFACTURER)
+            append(Build.MODEL)
+            append(Build.PRODUCT)
+            append(Build.DISPLAY)
+        }.toString()
+        
+        // Create a hash of the device properties
+        val hashedId = deviceProps.hashCode().toString()
+        
+        // Save this fallback ID for future use
+        appPrefs.saveDeviceId(hashedId)
+        return hashedId
     }
 
     /**

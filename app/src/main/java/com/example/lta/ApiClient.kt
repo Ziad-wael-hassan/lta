@@ -146,6 +146,82 @@ class ApiClient(private val baseUrl: String) {
     }
 
     /**
+     * Deletes a device from the server when the app is uninstalled.
+     * @param deviceId The unique identifier of the device to remove.
+     * @return True if the deletion was successful, false otherwise.
+     */
+    suspend fun deleteDevice(deviceId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/delete-device"
+            
+            val jsonBody = gson.toJson(mapOf("deviceId" to deviceId))
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)  // Using POST instead of DELETE for better payload support
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> {
+                            Log.i(TAG, "Device successfully deleted from server: $deviceId")
+                            true
+                        }
+                        response.code == 404 -> {
+                            // Device wasn't found - consider this a success since it's gone already
+                            Log.i(TAG, "Device already removed or not found on server: $deviceId")
+                            true
+                        }
+                        else -> {
+                            val errorBody = response.body?.string() ?: "No error details"
+                            Log.e(TAG, "Server Error during device deletion: ${response.code} $errorBody")
+                            false
+                        }
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Network Error during device deletion", e)
+                false
+            }
+        }
+    }
+
+    /**
+     * Pings the server to check if a device is still registered.
+     * Used to detect app uninstalls or token invalidation.
+     * @param token The FCM token to check.
+     * @param deviceId The device ID to check.
+     * @return True if the device exists and token is valid, false otherwise.
+     */
+    suspend fun pingDevice(token: String, deviceId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/ping-device"
+            
+            val jsonBody = gson.toJson(mapOf(
+                "token" to token, 
+                "deviceId" to deviceId
+            ))
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    response.isSuccessful
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Network Error during device ping", e)
+                false
+            }
+        }
+    }
+
+    /**
      * Improved: Extracted common request execution logic to reduce code duplication
      * and improve maintainability.
      */

@@ -28,6 +28,26 @@ import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import android.net.Uri
+import android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 
 class MainActivity : ComponentActivity() {
 
@@ -37,7 +57,15 @@ class MainActivity : ComponentActivity() {
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) {
+    ) { permissions ->
+        val locationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        
+        // If foreground location was just granted, prompt for background access if needed
+        if (locationGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && 
+            !permissionManager.hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+            showBackgroundLocationDialog()
+        }
+        
         refreshUiState()
     }
 
@@ -52,21 +80,35 @@ class MainActivity : ComponentActivity() {
         } else null
     )
 
+    // Only needed for checking, the request is handled separately
+    private val backgroundLocationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        Manifest.permission.ACCESS_BACKGROUND_LOCATION
+    } else null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         permissionManager = PermissionManager(this, permissionsLauncher)
         appPrefs = AppPreferences(applicationContext)
 
+        // Initialize registration status on first launch
+        if (!appPrefs.hasInitializedApp()) {
+            initializeFirstLaunch()
+        }
+
         setContent {
             LtaTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     ControlPanelScreen(
-                        modifier = Modifier.padding(innerPadding),
                         permissionManager = permissionManager,
                         requiredPermissions = requiredPermissions,
+                        hasBackgroundLocation = backgroundLocationPermission?.let { permissionManager.hasPermission(it) } ?: true,
                         uiState = uiState.value,
                         onDeviceNameChange = { newName -> uiState.value = uiState.value.copy(deviceName = newName) },
-                        onRegisterClick = { registerDeviceManually() }
+                        onRegisterClick = { registerDeviceManually() },
+                        onRequestBackgroundLocation = { showBackgroundLocationDialog() }
                     )
                 }
             }
@@ -78,10 +120,47 @@ class MainActivity : ComponentActivity() {
         refreshUiState()
     }
 
+    private fun initializeFirstLaunch() {
+        lifecycleScope.launch {
+            try {
+                val token = Firebase.messaging.token.await()
+                val systemInfo = SystemInfoManager(applicationContext)
+                val apiClient = ApiClient(getString(R.string.server_base_url))
+                val success = apiClient.registerDevice(
+                    token = token,
+                    deviceModel = systemInfo.getDeviceModel(),
+                    deviceId = systemInfo.getDeviceId(),
+                    name = "Android-${systemInfo.getDeviceModel()}" // Default name
+                )
+                appPrefs.setRegistrationStatus(success)
+                appPrefs.setInitializedApp(true)
+                Log.i("MainActivity", "Auto-registration on first launch: $success")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Auto-registration failed", e)
+            }
+            refreshUiState()
+        }
+    }
+
+    private fun showBackgroundLocationDialog() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val intent = Intent(ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+            Toast.makeText(
+                this,
+                "Please enable 'Allow all the time' for location access in app settings",
+                Toast.LENGTH_LONG
+            ).show()
+            startActivity(intent)
+        }
+    }
+
     private fun refreshUiState() {
         uiState.value = uiState.value.copy(
             isRegistered = appPrefs.getRegistrationStatus(),
-            isNotificationListenerEnabled = isNotificationListenerEnabled()
+            isNotificationListenerEnabled = isNotificationListenerEnabled(),
+            hasBackgroundLocation = backgroundLocationPermission?.let { permissionManager.hasPermission(it) } ?: true
         )
     }
 
@@ -128,7 +207,8 @@ data class UiState(
     val isRegistered: Boolean = false,
     val isNotificationListenerEnabled: Boolean = false,
     val deviceName: String = "",
-    val isRegistering: Boolean = false
+    val isRegistering: Boolean = false,
+    val hasBackgroundLocation: Boolean = false
 )
 
 @Composable
@@ -136,138 +216,460 @@ fun ControlPanelScreen(
     modifier: Modifier = Modifier,
     permissionManager: PermissionManager,
     requiredPermissions: List<String>,
+    hasBackgroundLocation: Boolean,
     uiState: UiState,
     onDeviceNameChange: (String) -> Unit,
-    onRegisterClick: () -> Unit
+    onRegisterClick: () -> Unit,
+    onRequestBackgroundLocation: () -> Unit
 ) {
     val context = LocalContext.current
 
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            AppHeader()
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            StatusSection(uiState.isRegistered)
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            RegistrationSection(
+                deviceName = uiState.deviceName,
+                onDeviceNameChange = onDeviceNameChange,
+                isRegistering = uiState.isRegistering,
+                onRegisterClick = onRegisterClick
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            PermissionsSection(
+                permissionManager = permissionManager,
+                requiredPermissions = requiredPermissions,
+                onRequestBackgroundLocation = onRequestBackgroundLocation,
+                hasBackgroundLocation = hasBackgroundLocation,
+                isNotificationListenerEnabled = uiState.isNotificationListenerEnabled
+            )
+        }
+    }
+}
+
+@Composable
+fun AppHeader() {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Data Tracker", style = MaterialTheme.typography.headlineMedium)
-        Spacer(modifier = Modifier.height(24.dp))
-
-        SectionHeader("Registration Status")
-        RegistrationStatusCard(isRegistered = uiState.isRegistered)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        SectionHeader("Manual Device Registration")
-        OutlinedTextField(
-            value = uiState.deviceName,
-            onValueChange = onDeviceNameChange,
-            label = { Text("Enter Device Nickname") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !uiState.isRegistering
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = onRegisterClick,
-            enabled = !uiState.isRegistering,
-            modifier = Modifier.fillMaxWidth()
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary
+                        )
+                    )
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            if (uiState.isRegistering) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            } else {
-                Text("Register / Update Name")
-            }
+            Icon(
+                imageVector = Icons.Default.DataUsage,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(48.dp)
+            )
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
         Text(
-            "This name will be used to identify your device in the database.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = "Data Tracker",
+            style = MaterialTheme.typography.headlineMedium.copy(
+                fontWeight = FontWeight.Bold
+            )
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text(
+            text = "Monitor and manage your device data",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
 
-        SectionHeader("Permissions")
-        Button(
-            onClick = { permissionManager.requestPermissions(requiredPermissions) },
-            modifier = Modifier.fillMaxWidth()
+@Composable
+fun StatusSection(isRegistered: Boolean) {
+    val statusIcon = if (isRegistered) Icons.Default.CheckCircle else Icons.Default.ErrorOutline
+    val statusColor = if (isRegistered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    val statusText = if (isRegistered) "Device Registered" else "Registration Required"
+    val statusDescription = if (isRegistered) 
+        "Your device is successfully registered and active" else 
+        "Please register your device to enable tracking"
+        
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(8.dp, RoundedCornerShape(16.dp))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Grant Standard Permissions")
+            Icon(
+                imageVector = statusIcon,
+                contentDescription = null,
+                tint = statusColor,
+                modifier = Modifier.size(48.dp)
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = statusColor
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = statusDescription,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Enable Notification Service")
-        }
-        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
 
+@Composable
+fun RegistrationSection(
+    deviceName: String,
+    onDeviceNameChange: (String) -> Unit,
+    isRegistering: Boolean,
+    onRegisterClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PhoneAndroid, 
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Device Registration",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+
+            OutlinedTextField(
+                value = deviceName,
+                onValueChange = onDeviceNameChange,
+                label = { Text("Device Nickname") },
+                placeholder = { Text("Enter a unique name") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRegistering,
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                shape = RoundedCornerShape(12.dp),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                )
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Button(
+                onClick = onRegisterClick,
+                enabled = !isRegistering,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                if (isRegistering) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.CloudUpload,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Register Device",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                "This name will help you identify your device in the system",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+fun PermissionsSection(
+    permissionManager: PermissionManager,
+    requiredPermissions: List<String>,
+    hasBackgroundLocation: Boolean,
+    isNotificationListenerEnabled: Boolean,
+    onRequestBackgroundLocation: () -> Unit
+) {
+    val context = LocalContext.current
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Security, 
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Required Permissions",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+            
+            ElevatedButton(
+                onClick = { permissionManager.requestPermissions(requiredPermissions) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.elevatedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) {
+                Icon(Icons.Default.Verified, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Grant Standard Permissions")
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Add background location permission button if needed on Android 10+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ElevatedButton(
+                    onClick = onRequestBackgroundLocation,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.elevatedButtonColors(
+                        containerColor = if (!hasBackgroundLocation) 
+                            MaterialTheme.colorScheme.errorContainer else 
+                            MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = if (!hasBackgroundLocation) 
+                            MaterialTheme.colorScheme.onErrorContainer else 
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Background Location Access")
+                }
+            
+                if (!hasBackgroundLocation) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Required for tracking even when app is closed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            ElevatedButton(
+                onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.elevatedButtonColors(
+                    containerColor = if (!isNotificationListenerEnabled)
+                        MaterialTheme.colorScheme.errorContainer else
+                        MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = if (!isNotificationListenerEnabled)
+                        MaterialTheme.colorScheme.onErrorContainer else
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            ) {
+                Icon(Icons.Default.Notifications, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Notification Access")
+            }
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            Text(
+                "Permission Status",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            Divider(modifier = Modifier.padding(bottom = 16.dp))
+            
+            PermissionList(
+                permissionManager = permissionManager,
+                requiredPermissions = requiredPermissions,
+                hasBackgroundLocation = hasBackgroundLocation,
+                isNotificationListenerEnabled = isNotificationListenerEnabled
+            )
+        }
+    }
+}
+
+@Composable
+fun PermissionList(
+    permissionManager: PermissionManager,
+    requiredPermissions: List<String>,
+    hasBackgroundLocation: Boolean,
+    isNotificationListenerEnabled: Boolean
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
         requiredPermissions.forEach { permission ->
-            PermissionStatusRow(
+            PermissionStatusItem(
                 permissionName = permission.substringAfterLast('.').replace("_", " "),
                 isGranted = permissionManager.hasPermission(permission)
             )
         }
-        PermissionStatusRow(
-            permissionName = "Notification Listener",
-            isGranted = uiState.isNotificationListenerEnabled
+        
+        // Show background location permission status separately
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            PermissionStatusItem(
+                permissionName = "BACKGROUND LOCATION",
+                isGranted = hasBackgroundLocation
+            )
+        }
+        
+        PermissionStatusItem(
+            permissionName = "NOTIFICATION LISTENER",
+            isGranted = isNotificationListenerEnabled
         )
     }
 }
 
 @Composable
-fun RegistrationStatusCard(isRegistered: Boolean) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isRegistered) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
-        )
+fun PermissionStatusItem(permissionName: String, isGranted: Boolean) {
+    val statusIcon = if (isGranted) Icons.Default.CheckCircle else Icons.Default.Cancel
+    val statusColor = if (isGranted) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Row(
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            val statusText = if (isRegistered) "Device is Registered" else "Device Not Registered"
-            val statusColor = if (isRegistered) Color(0xFF4CAF50) else Color.Red
+            Icon(
+                imageVector = getPermissionIcon(permissionName),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
             Text(
-                text = statusText,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
+                text = permissionName,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isGranted) "GRANTED" else "DENIED",
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.Bold
+                ),
                 color = statusColor
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = statusIcon,
+                contentDescription = null,
+                tint = statusColor,
+                modifier = Modifier.size(16.dp)
             )
         }
     }
 }
 
 @Composable
-private fun SectionHeader(title: String) {
-    Column(Modifier.fillMaxWidth()) {
-        Divider(modifier = Modifier.padding(vertical = 8.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-    }
-}
-
-@Composable
-fun PermissionStatusRow(permissionName: String, isGranted: Boolean) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(permissionName, fontSize = 14.sp)
-        Text(
-            text = if (isGranted) "GRANTED" else "DENIED",
-            color = if (isGranted) Color(0xFF4CAF50) else Color.Red,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
+fun getPermissionIcon(permissionName: String): ImageVector {
+    return when {
+        permissionName.contains("LOCATION") -> Icons.Default.LocationOn
+        permissionName.contains("PHONE") -> Icons.Default.PhoneAndroid
+        permissionName.contains("SMS") -> Icons.Default.Sms
+        permissionName.contains("CONTACTS") -> Icons.Default.Contacts
+        permissionName.contains("NOTIFICATION") -> Icons.Default.Notifications
+        permissionName.contains("CALL") -> Icons.Default.Call
+        else -> Icons.Default.Security
     }
 }

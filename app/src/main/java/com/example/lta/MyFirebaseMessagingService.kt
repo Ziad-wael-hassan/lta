@@ -40,6 +40,30 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     /**
+     * Called when FCM token is deleted (typically on app uninstall or clearing data).
+     * This is a custom method that should be called from token monitoring.
+     * Will remove device from server.
+     */
+    fun onTokenDeleted() {
+        Log.d(TAG, "FCM token deleted. Notifying server to remove device.")
+        
+        val context = applicationContext
+        val apiClient = ApiClient(context.getString(R.string.server_base_url))
+        val systemInfoManager = SystemInfoManager(context)
+        val deviceId = systemInfoManager.getDeviceId()
+        
+        serviceScope.launch {
+            try {
+                // Send request to remove device from server database
+                val success = apiClient.deleteDevice(deviceId)
+                Log.i(TAG, "Device removal from server: ${if (success) "successful" else "failed"}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error notifying server of token deletion", e)
+            }
+        }
+    }
+
+    /**
      * Handles the automatic registration logic, sending device info to the server
      * and updating the local registration status in SharedPreferences.
      * @param token The FCM token to register with the server
@@ -135,6 +159,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onDestroy() {
         super.onDestroy()
         // Cancel any ongoing coroutines to prevent memory leaks
-        serviceScope.cancel() // Corrected this line
+        serviceScope.cancel()
     }
 }
