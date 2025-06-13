@@ -9,6 +9,12 @@ git add .
 # Step 2: Ask for commit message
 read -p "📝 Enter commit message: " message
 
+# Step 2.5: Fallback message if none provided
+if [[ -z "$message" ]]; then
+  message="🐞 Probably a bug fix (commit message not provided)"
+  echo "⚠️  No commit message entered. Using default: \"$message\""
+fi
+
 # Step 3: Commit the changes
 git commit -m "$message"
 
