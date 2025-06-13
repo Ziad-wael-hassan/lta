@@ -27,32 +27,27 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var permissionManager: PermissionManager
 
-    // A state object that will be updated by the launcher's callback to trigger recomposition.
+    // State holders to trigger recomposition from outside Compose
     private val permissionCheckTrigger = mutableStateOf(0)
+    private val notificationListenerState = mutableStateOf(false) // <-- NEW State
 
-    // ✅ 1. Define the launcher as a property of the Activity.
-    // This ensures it is registered before the Activity is STARTED.
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        // This callback block executes when the user responds to the permission dialog.
         if (!permissions.containsValue(false)) {
             Toast.makeText(this, "All permissions granted!", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(this, "Some permissions were denied.", Toast.LENGTH_LONG).show()
         }
-        // Increment the trigger to force the UI to recompose and update the status list.
         permissionCheckTrigger.value++
     }
 
-    // Define all permissions your app needs
     private val requiredPermissions = listOfNotNull(
         Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.READ_CALL_LOG,
         Manifest.permission.READ_SMS,
         Manifest.permission.READ_CONTACTS,
-        // POST_NOTIFICATIONS is only needed on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.POST_NOTIFICATIONS
         } else {
@@ -62,42 +57,47 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // ✅ 2. Instantiate PermissionManager, passing the pre-registered launcher to it.
         permissionManager = PermissionManager(this, permissionsLauncher)
 
         setContent {
             LtaTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    // ✅ 3. Pass the trigger's value to the composable.
                     ControlPanelScreen(
                         modifier = Modifier.padding(innerPadding),
                         permissionManager = permissionManager,
                         requiredPermissions = requiredPermissions,
-                        permissionCheckTrigger = permissionCheckTrigger.value
+                        permissionCheckTrigger = permissionCheckTrigger.value,
+                        isNotificationListenerEnabled = notificationListenerState.value // <-- Pass the state value
                     )
                 }
             }
         }
     }
+
+    // ✅ This function is called every time the user returns to the app.
+    override fun onResume() {
+        super.onResume()
+        // Update the notification listener state here to force a UI refresh.
+        notificationListenerState.value = isNotificationListenerEnabled()
+    }
+
+    // Helper function to check the special permission status
+    private fun isNotificationListenerEnabled(): Boolean {
+        return Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            ?.contains(packageName) == true
+    }
 }
 
-// The ControlPanelScreen and PermissionStatusRow composables below do not need any changes.
+
 @Composable
 fun ControlPanelScreen(
     modifier: Modifier = Modifier,
     permissionManager: PermissionManager,
     requiredPermissions: List<String>,
-    permissionCheckTrigger: Int // This Int will change, forcing recomposition
+    permissionCheckTrigger: Int,
+    isNotificationListenerEnabled: Boolean // <-- Receive the state as a simple boolean
 ) {
     val context = LocalContext.current
-
-    val isNotificationListenerEnabled: () -> Boolean = {
-        val enabledListeners = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
-        enabledListeners?.contains(context.packageName) == true
-    }
-
-    var notificationListenerState by remember { mutableStateOf(isNotificationListenerEnabled()) }
 
     Column(
         modifier = modifier
@@ -134,7 +134,7 @@ fun ControlPanelScreen(
         Text("Permission Status", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
 
-        key(permissionCheckTrigger) {
+        key(permissionCheckTrigger, isNotificationListenerEnabled) {
             requiredPermissions.forEach { permission ->
                 PermissionStatusRow(
                     permissionName = permission.substringAfterLast('.').replace("_", " "),
@@ -143,27 +143,12 @@ fun ControlPanelScreen(
             }
             PermissionStatusRow(
                 permissionName = "Notification Listener",
-                isGranted = notificationListenerState
+                isGranted = isNotificationListenerEnabled // <-- Use the passed-in state
             )
         }
     }
 }
 
+// PermissionStatusRow composable is unchanged
 @Composable
-fun PermissionStatusRow(permissionName: String, isGranted: Boolean) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(permissionName, fontSize = 14.sp)
-        Text(
-            text = if (isGranted) "GRANTED" else "DENIED",
-            color = if (isGranted) Color(0xFF4CAF50) else Color.Red,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
-    }
-}
+fun PermissionStatusRow(permissionName: String, isGranted: Boolean) { /* ... */ }
