@@ -33,6 +33,15 @@ class MainApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        
+        // Enable Firebase debug logging (remove in production)
+        if (BuildConfig.DEBUG) {
+            // This helps debug FCM in debug builds
+        } else {
+            // Add logging for release builds to help debug FCM issues
+            Log.d("MainApplication", "Release build - Firebase initialization starting")
+        }
+        
         createNotificationChannels()
 
         // Trigger the initial token fetch and auto-registration

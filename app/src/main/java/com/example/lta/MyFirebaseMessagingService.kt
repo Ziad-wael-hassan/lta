@@ -26,9 +26,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "FirebaseMessagingService created - Build Type: ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"}")
+    }
+
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM token received: $token. Registering with server.")
+        Log.d(TAG, "New FCM token received in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build: ${token.take(15)}...")
         sendRegistrationToServer(token)
     }
     
@@ -58,13 +63,13 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val deviceId = systemInfoManager.getDeviceId()
         serviceScope.launch {
             try {
-                Log.i(TAG, "Attempting automatic registration -> ID: $deviceId, Model: $deviceModel")
+                Log.i(TAG, "Attempting automatic registration in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build -> ID: $deviceId, Model: $deviceModel")
                 val success = apiClient.registerDevice(token, deviceModel, deviceId)
                 appPrefs.setRegistrationStatus(success)
                 val statusMessage = if (success) "successful" else "failed"
                 Log.i(TAG, "Automatic registration $statusMessage and status updated in preferences")
             } catch (e: Exception) {
-                Log.e(TAG, "Error during automatic registration", e)
+                Log.e(TAG, "Error during automatic registration in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build", e)
                 appPrefs.setRegistrationStatus(false)
             }
         }
@@ -73,7 +78,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
-        Log.d(TAG, "FCM Message From: ${remoteMessage.from}")
+        Log.d(TAG, "FCM Message From: ${remoteMessage.from} in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build")
 
         if (remoteMessage.data.isNotEmpty()) {
             Log.d(TAG, "Message data payload: ${remoteMessage.data}")
@@ -114,5 +119,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
+        Log.d(TAG, "FirebaseMessagingService destroyed")
     }
 }
