@@ -1,7 +1,6 @@
 package com.example.lta
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -9,6 +8,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -27,6 +27,24 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var permissionManager: PermissionManager
 
+    // A state object that will be updated by the launcher's callback to trigger recomposition.
+    private val permissionCheckTrigger = mutableStateOf(0)
+
+    // ✅ 1. Define the launcher as a property of the Activity.
+    // This ensures it is registered before the Activity is STARTED.
+    private val permissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        // This callback block executes when the user responds to the permission dialog.
+        if (!permissions.containsValue(false)) {
+            Toast.makeText(this, "All permissions granted!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Some permissions were denied.", Toast.LENGTH_LONG).show()
+        }
+        // Increment the trigger to force the UI to recompose and update the status list.
+        permissionCheckTrigger.value++
+    }
+
     // Define all permissions your app needs
     private val requiredPermissions = listOfNotNull(
         Manifest.permission.READ_PHONE_STATE,
@@ -44,35 +62,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        permissionManager = PermissionManager(this)
+
+        // ✅ 2. Instantiate PermissionManager, passing the pre-registered launcher to it.
+        permissionManager = PermissionManager(this, permissionsLauncher)
 
         setContent {
             LtaTheme {
-                // We need to trigger recomposition when permission states change.
-                var permissionTrigger by remember { mutableStateOf(0) }
-                val onPermissionsResult = { permissionTrigger++ }
-
-                // Register the permission manager launcher
-                LaunchedEffect(Unit) {
-                    permissionManager.register(
-                        onAllGranted = {
-                            Toast.makeText(this@MainActivity, "All permissions granted!", Toast.LENGTH_SHORT).show()
-                            onPermissionsResult()
-                        },
-                        onSomeDenied = {
-                            Toast.makeText(this@MainActivity, "Some permissions were denied.", Toast.LENGTH_LONG).show()
-                            onPermissionsResult()
-                        }
-                    )
-                }
-
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    // ✅ 3. Pass the trigger's value to the composable.
                     ControlPanelScreen(
                         modifier = Modifier.padding(innerPadding),
                         permissionManager = permissionManager,
                         requiredPermissions = requiredPermissions,
-                        // Pass the trigger to force recomposition
-                        permissionCheckTrigger = permissionTrigger
+                        permissionCheckTrigger = permissionCheckTrigger.value
                     )
                 }
             }
@@ -80,22 +82,21 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// The ControlPanelScreen and PermissionStatusRow composables below do not need any changes.
 @Composable
 fun ControlPanelScreen(
     modifier: Modifier = Modifier,
     permissionManager: PermissionManager,
     requiredPermissions: List<String>,
-    permissionCheckTrigger: Int
+    permissionCheckTrigger: Int // This Int will change, forcing recomposition
 ) {
     val context = LocalContext.current
 
-    // This function checks the status of the special Notification Listener permission
     val isNotificationListenerEnabled: () -> Boolean = {
         val enabledListeners = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
         enabledListeners?.contains(context.packageName) == true
     }
 
-    // This state will update whenever we check permissions
     var notificationListenerState by remember { mutableStateOf(isNotificationListenerEnabled()) }
 
     Column(
@@ -110,7 +111,6 @@ fun ControlPanelScreen(
         Text("Grant permissions to enable all features.", style = MaterialTheme.typography.bodyMedium)
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Button to request all standard permissions at once
         Button(
             onClick = { permissionManager.requestPermissions(requiredPermissions) },
             modifier = Modifier.fillMaxWidth()
@@ -119,13 +119,9 @@ fun ControlPanelScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Button to open settings for the Notification Listener
         Button(
             onClick = {
                 context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                // A common pattern is to check again when the user comes back to the app,
-                // but for simplicity, we'll rely on a manual re-check or app restart.
-                // To make it more robust, you would use `rememberLauncherForActivityResult`.
             },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -138,8 +134,6 @@ fun ControlPanelScreen(
         Text("Permission Status", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Display the status of all permissions
-        // The `key` forces this block to re-evaluate when permissionCheckTrigger changes
         key(permissionCheckTrigger) {
             requiredPermissions.forEach { permission ->
                 PermissionStatusRow(
@@ -147,7 +141,6 @@ fun ControlPanelScreen(
                     isGranted = permissionManager.hasPermission(permission)
                 )
             }
-            // Also display the status of the special permission
             PermissionStatusRow(
                 permissionName = "Notification Listener",
                 isGranted = notificationListenerState
