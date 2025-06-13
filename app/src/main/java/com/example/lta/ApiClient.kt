@@ -15,9 +15,9 @@ import java.io.IOException
 
 /**
  * Data class to represent the JSON payload for device registration.
- * Now includes the unique deviceId.
+ * Now includes an optional 'name' field.
  */
-data class DeviceRegistrationPayload(val token: String, val model: String, val deviceId: String)
+data class DeviceRegistrationPayload(val token: String, val model: String, val deviceId: String, val name: String? = null)
 
 /**
  * Handles all network communication with the backend server.
@@ -31,14 +31,15 @@ class ApiClient(private val baseUrl: String) {
     /**
      * Registers the device's FCM token, model, and unique ID with the server.
      * @param token The FCM registration token.
-     * @param deviceModel The model name of the device (e.g., "Pixel 7 Pro").
+     * @param deviceModel The model name of the device.
      * @param deviceId The unique Android ID for the device.
+     * @param name An optional, user-provided name for the device.
      * @return True if the registration was successful, false otherwise.
      */
-    suspend fun registerDevice(token: String, deviceModel: String, deviceId: String): Boolean {
+    suspend fun registerDevice(token: String, deviceModel: String, deviceId: String, name: String? = null): Boolean {
         return withContext(Dispatchers.IO) {
             val url = "$baseUrl/api/register-device"
-            val payload = DeviceRegistrationPayload(token = token, model = deviceModel, deviceId = deviceId)
+            val payload = DeviceRegistrationPayload(token, deviceModel, deviceId, name)
             val jsonBody = gson.toJson(payload)
 
             val requestBody = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
@@ -62,12 +63,10 @@ class ApiClient(private val baseUrl: String) {
 
     /**
      * Uploads a simple text message to the server.
-     * @param message The text message to send.
-     * @return True if the upload was successful, false otherwise.
      */
     suspend fun uploadText(message: String): Boolean {
         return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/upload" // Corrected endpoint
+            val url = "$baseUrl/api/upload"
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("message", message)
@@ -88,13 +87,10 @@ class ApiClient(private val baseUrl: String) {
 
     /**
      * Uploads a file (like a CSV) with a caption to the server.
-     * @param file The file to upload.
-     * @param caption A descriptive caption for the file.
-     * @return True if the upload was successful, false otherwise.
      */
     suspend fun uploadFile(file: File, caption: String): Boolean {
         return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/upload" // Corrected endpoint
+            val url = "$baseUrl/api/upload"
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("caption", caption)
