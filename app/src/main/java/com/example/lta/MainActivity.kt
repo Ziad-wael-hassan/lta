@@ -25,7 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.lifecycleScope // ✅ ADDED IMPORT
+import androidx.lifecycle.lifecycleScope
 import com.example.lta.ui.theme.LtaTheme
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // The callback now just triggers a UI refresh.
+        // This callback now just triggers a UI refresh.
         refreshUiState()
     }
 
@@ -102,12 +102,10 @@ class MainActivity : ComponentActivity() {
         }
 
         uiState.value = uiState.value.copy(isRegistering = true)
-        // ✅ CORRECTED: Use the lifecycleScope property directly.
         lifecycleScope.launch {
             try {
                 val apiClient = ApiClient(getString(R.string.server_base_url))
                 val systemInfo = SystemInfoManager(applicationContext)
-                // ✅ CORRECTED: All suspend functions are now correctly called inside a coroutine.
                 val token = Firebase.messaging.token.await()
                 val success = apiClient.registerDevice(
                     token = token,
@@ -216,7 +214,7 @@ fun ControlPanelScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
 
-        // The permission list will now correctly recompose because its parent does
+        // This list now correctly updates whenever onResume is called.
         requiredPermissions.forEach { permission ->
             PermissionStatusRow(
                 permissionName = permission.substringAfterLast('.').replace("_", " "),
