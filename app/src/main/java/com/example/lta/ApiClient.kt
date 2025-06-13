@@ -1,3 +1,4 @@
+// ApiClient.kt
 package com.example.lta
 
 import android.util.Log
@@ -12,21 +13,40 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * Data class to represent the JSON payload for device registration.
  * Now includes an optional 'name' field.
  */
-data class DeviceRegistrationPayload(val token: String, val model: String, val deviceId: String, val name: String? = null)
+data class DeviceRegistrationPayload(
+    val token: String,
+    val model: String,
+    val deviceId: String,
+    val name: String? = null
+)
 
 /**
  * Handles all network communication with the backend server.
+ * Provides methods for device registration and file/text uploads.
  */
 class ApiClient(private val baseUrl: String) {
 
-    private val client = OkHttpClient()
+    // Improved: Configured OkHttpClient with proper timeouts for better performance
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+    
     private val gson = Gson()
-    private val TAG = "ApiClient"
+    
+    // Improved: Made TAG a companion object constant following Kotlin conventions
+    companion object {
+        private const val TAG = "ApiClient"
+        private const val MEDIA_TYPE_JSON = "application/json; charset=utf-8"
+        private const val MEDIA_TYPE_CSV = "text/csv"
+    }
 
     /**
      * Registers the device's FCM token, model, and unique ID with the server.
@@ -36,23 +56,37 @@ class ApiClient(private val baseUrl: String) {
      * @param name An optional, user-provided name for the device.
      * @return True if the registration was successful, false otherwise.
      */
-    suspend fun registerDevice(token: String, deviceModel: String, deviceId: String, name: String? = null): Boolean {
+    suspend fun registerDevice(
+        token: String,
+        deviceModel: String,
+        deviceId: String,
+        name: String? = null
+    ): Boolean {
         return withContext(Dispatchers.IO) {
             val url = "$baseUrl/api/register-device"
             val payload = DeviceRegistrationPayload(token, deviceModel, deviceId, name)
             val jsonBody = gson.toJson(payload)
 
-            val requestBody = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
-            val request = Request.Builder().url(url).post(requestBody).build()
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
 
             try {
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "Server Error during device registration: ${response.code} ${response.body?.string()}")
-                    } else {
-                        Log.i(TAG, "Device registered successfully with token, model, and ID.")
+                    when {
+                        response.isSuccessful -> {
+                            Log.i(TAG, "Device registered successfully with token, model, and ID.")
+                            true
+                        }
+                        else -> {
+                            // Improved: Better error logging with null-safe response body handling
+                            val errorBody = response.body?.string() ?: "No error details"
+                            Log.e(TAG, "Server Error during device registration: ${response.code} $errorBody")
+                            false
+                        }
                     }
-                    response.isSuccessful
                 }
             } catch (e: IOException) {
                 Log.e(TAG, "Network Error during device registration", e)
@@ -63,6 +97,8 @@ class ApiClient(private val baseUrl: String) {
 
     /**
      * Uploads a simple text message to the server.
+     * @param message The text message to upload.
+     * @return True if the upload was successful, false otherwise.
      */
     suspend fun uploadText(message: String): Boolean {
         return withContext(Dispatchers.IO) {
@@ -71,22 +107,21 @@ class ApiClient(private val baseUrl: String) {
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("message", message)
                 .build()
-            val request = Request.Builder().url(url).post(requestBody).build()
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
 
-            try {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) Log.e(TAG, "Server Error on uploadText: ${response.code} ${response.body?.string()}")
-                    response.isSuccessful
-                }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error on uploadText", e)
-                false
-            }
+            executeRequest(request, "uploadText")
         }
     }
 
     /**
      * Uploads a file (like a CSV) with a caption to the server.
+     * @param file The file to upload.
+     * @param caption A caption describing the file.
+     * @return True if the upload was successful, false otherwise.
      */
     suspend fun uploadFile(file: File, caption: String): Boolean {
         return withContext(Dispatchers.IO) {
@@ -94,19 +129,44 @@ class ApiClient(private val baseUrl: String) {
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("caption", caption)
-                .addFormDataPart("document", file.name, file.asRequestBody("text/csv".toMediaTypeOrNull()))
+                .addFormDataPart(
+                    "document", 
+                    file.name, 
+                    file.asRequestBody(MEDIA_TYPE_CSV.toMediaTypeOrNull())
+                )
                 .build()
-            val request = Request.Builder().url(url).post(requestBody).build()
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
 
-            try {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) Log.e(TAG, "Server Error on uploadFile: ${response.code} ${response.body?.string()}")
-                    response.isSuccessful
+            executeRequest(request, "uploadFile")
+        }
+    }
+
+    /**
+     * Improved: Extracted common request execution logic to reduce code duplication
+     * and improve maintainability.
+     */
+    private fun executeRequest(request: Request, operationName: String): Boolean {
+        return try {
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.isSuccessful -> {
+                        Log.d(TAG, "$operationName completed successfully")
+                        true
+                    }
+                    else -> {
+                        val errorBody = response.body?.string() ?: "No error details"
+                        Log.e(TAG, "Server Error on $operationName: ${response.code} $errorBody")
+                        false
+                    }
                 }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error on uploadFile", e)
-                false
             }
+        } catch (e: IOException) {
+            Log.e(TAG, "Network Error on $operationName", e)
+            false
         }
     }
 }

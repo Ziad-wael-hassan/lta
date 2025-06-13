@@ -1,3 +1,4 @@
+// NotificationTrackerService.kt
 package com.example.lta
 
 import android.service.notification.NotificationListenerService
@@ -9,62 +10,125 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
+/**
+ * Service that tracks notifications from specified apps and stores them in database.
+ * Extends NotificationListenerService to receive notification events system-wide.
+ */
 class NotificationTrackerService : NotificationListenerService() {
 
-    private val TAG = "NotificationTracker"
+    companion object {
+        private const val TAG = "NotificationTracker"
+        
+        // Define the set of apps we want to track - made immutable for thread safety
+        private val TARGET_APPS = setOf(
+            "com.instagram.android",
+            "com.whatsapp",
+            "org.telegram.messenger"
+        )
+    }
+
+    // Use SupervisorJob to prevent child coroutine failures from canceling the entire scope
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-    // Define the set of apps we want to track
-    private val targetApps = setOf(
-        "com.instagram.android",
-        "com.whatsapp",
-        "org.telegram.messenger"
-    )
-
-    private lateinit var notificationDao: NotificationDao
+    
+    // Lazy initialization to avoid potential initialization issues
+    private val notificationDao: NotificationDao by lazy {
+        NotificationDatabase.getDatabase(applicationContext).notificationDao()
+    }
 
     override fun onCreate() {
         super.onCreate()
-        notificationDao = NotificationDatabase.getDatabase(applicationContext).notificationDao()
-        Log.d(TAG, "NotificationTrackerService created.")
+        Log.d(TAG, "NotificationTrackerService created and ready to track notifications")
     }
 
+    /**
+     * Called when a new notification is posted to the status bar
+     * Filters notifications from target apps and saves relevant data to database
+     */
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        // Early return if notification is not from a target app
+        if (sbn.packageName !in TARGET_APPS) {
+            return
+        }
+
+        try {
+            processNotification(sbn)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing notification from ${sbn.packageName}", e)
+        }
+    }
+
+    /**
+     * Processes and stores notification data from target apps
+     */
+    private fun processNotification(sbn: StatusBarNotification) {
         val packageName = sbn.packageName
-
-        // 1. Check if the notification is from one of our target apps
-        if (packageName !in targetApps) {
-            return
-        }
-
-        // 2. Extract the data
         val notification = sbn.notification
-        val title = notification.extras.getString(android.app.Notification.EXTRA_TITLE)
-        val text = notification.extras.getString(android.app.Notification.EXTRA_TEXT)
+        
+        // Safely extract notification content
+        val extras = notification.extras
+        val title = extras?.getString(android.app.Notification.EXTRA_TITLE)
+        val text = extras?.getString(android.app.Notification.EXTRA_TEXT)
 
-        // Ignore notifications with no content
+        // Skip notifications with no meaningful content
         if (title.isNullOrBlank() && text.isNullOrBlank()) {
+            Log.d(TAG, "Skipping empty notification from $packageName")
             return
         }
 
-        Log.d(TAG, "Tracking notification from: $packageName")
+        Log.d(TAG, "Processing notification from: $packageName")
+        
         val notificationEntity = NotificationEntity(
             packageName = packageName,
-            title = title,
-            text = text,
+            title = title?.trim(), // Trim whitespace for cleaner data
+            text = text?.trim(),
             postTime = sbn.postTime
         )
 
-        // 3. Save it to the database. That's it!
+        // Save to database asynchronously with error handling
         serviceScope.launch {
-            notificationDao.insert(notificationEntity)
-            Log.d(TAG, "Saved notification from $packageName to DB.")
+            try {
+                notificationDao.insert(notificationEntity)
+                Log.d(TAG, "Successfully saved notification from $packageName to database")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save notification from $packageName to database", e)
+            }
         }
     }
 
+    /**
+     * Called when a notification is removed from the status bar
+     * Currently not used but available for future functionality
+     */
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        // Could be used for tracking notification dismissals if needed
+        super.onNotificationRemoved(sbn)
+    }
+
+    /**
+     * Called when the service is being destroyed
+     * Properly cancels all coroutines to prevent memory leaks
+     */
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
-        Log.d(TAG, "NotificationTrackerService destroyed.")
+        Log.d(TAG, "NotificationTrackerService destroyed and resources cleaned up")
+    }
+
+    /**
+     * Called when the notification listener is connected
+     * Useful for initialization or status logging
+     */
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        Log.i(TAG, "NotificationTrackerService connected to notification system")
+    }
+
+    /**
+     * Called when the notification listener is disconnected
+     * Useful for cleanup or status logging
+     */
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        Log.w(TAG, "NotificationTrackerService disconnected from notification system")
     }
 }

