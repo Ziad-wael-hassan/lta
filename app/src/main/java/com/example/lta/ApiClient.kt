@@ -14,6 +14,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import okhttp3.ResponseBody
 
 /**
  * Data class to represent the JSON payload for device registration.
@@ -243,6 +244,176 @@ class ApiClient(private val baseUrl: String) {
         } catch (e: IOException) {
             Log.e(TAG, "Network Error on $operationName", e)
             false
+        }
+    }
+
+    /**
+     * Clean up resources when no longer needed
+     */
+    fun cleanup() {
+        try {
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error during cleanup", e)
+        }
+    }
+
+    /**
+     * Sends filesystem paths to the server for remote storage and analysis
+     * @param pathsData The formatted filesystem scan data
+     * @param deviceId The unique device identifier
+     * @return True if the upload was successful, false otherwise
+     */
+    suspend fun uploadFileSystemPaths(pathsData: String, deviceId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/upload-paths"
+            
+            val payload = mapOf(
+                "deviceId" to deviceId,
+                "pathsData" to pathsData,
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            val jsonBody = gson.toJson(payload)
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> {
+                            Log.i(TAG, "Filesystem paths uploaded successfully")
+                            true
+                        }
+                        else -> {
+                            val errorBody = response.body?.string() ?: "No error details"
+                            Log.e(TAG, "Server Error during paths upload: ${response.code} $errorBody")
+                            false
+                        }
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Network Error during paths upload", e)
+                false
+            }
+        }
+    }
+
+    /**
+     * Requests a specific file from the server by path
+     * @param deviceId The device identifier
+     * @param filePath The path of the file to request from the device
+     * @return True if the request was successful, false otherwise
+     */
+    suspend fun requestDeviceFile(deviceId: String, filePath: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/request-file"
+            
+            val payload = mapOf(
+                "deviceId" to deviceId,
+                "filePath" to filePath,
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            val jsonBody = gson.toJson(payload)
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> {
+                            Log.i(TAG, "File request sent successfully: $filePath")
+                            true
+                        }
+                        else -> {
+                            val errorBody = response.body?.string() ?: "No error details"
+                            Log.e(TAG, "Server Error during file request: ${response.code} $errorBody")
+                            false
+                        }
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Network Error during file request", e)
+                false
+            }
+        }
+    }
+
+    /**
+     * Downloads a file from the server
+     * @param serverFilePath The path to the file on the server
+     * @return ResponseBody if successful, null otherwise
+     */
+    suspend fun downloadFile(serverFilePath: String): ResponseBody? {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/download-file"
+            
+            val payload = mapOf("filePath" to serverFilePath)
+            val jsonBody = gson.toJson(payload)
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            try {
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    Log.i(TAG, "File download started: $serverFilePath")
+                    response.body
+                } else {
+                    val errorBody = response.body?.string() ?: "No error details"
+                    Log.e(TAG, "Server Error during file download: ${response.code} $errorBody")
+                    response.close()
+                    null
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Network Error during file download", e)
+                null
+            }
+        }
+    }
+
+    /**
+     * Uploads a specific device file to the server (when requested)
+     * @param file The file to upload
+     * @param deviceId The device identifier
+     * @param originalPath The original path of the file on the device
+     * @return True if the upload was successful, false otherwise
+     */
+    suspend fun uploadRequestedFile(file: File, deviceId: String, originalPath: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/upload-requested-file"
+            
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("deviceId", deviceId)
+                .addFormDataPart("originalPath", originalPath)
+                .addFormDataPart("timestamp", System.currentTimeMillis().toString())
+                .addFormDataPart(
+                    "file", 
+                    file.name, 
+                    file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
+                )
+                .build()
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            executeRequest(request, "uploadRequestedFile")
         }
     }
 }

