@@ -1,4 +1,3 @@
-// MainActivity.kt
 package com.example.lta
 
 import android.Manifest
@@ -14,9 +13,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,14 +33,11 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var permissionManager: PermissionManager
     private lateinit var appPrefs: AppPreferences
-
-    // A single state holder for the entire UI, making state management clean.
     private val uiState = mutableStateOf(UiState())
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // This callback now just triggers a UI refresh.
         refreshUiState()
     }
 
@@ -56,9 +49,7 @@ class MainActivity : ComponentActivity() {
         Manifest.permission.READ_CONTACTS,
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.POST_NOTIFICATIONS
-        } else {
-            null
-        }
+        } else null
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,7 +79,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshUiState() {
-        // Update all parts of the UI state from their source of truth.
         uiState.value = uiState.value.copy(
             isRegistered = appPrefs.getRegistrationStatus(),
             isNotificationListenerEnabled = isNotificationListenerEnabled()
@@ -134,7 +124,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Data class to hold all UI-related state in one place
 data class UiState(
     val isRegistered: Boolean = false,
     val isNotificationListenerEnabled: Boolean = false,
@@ -163,12 +152,10 @@ fun ControlPanelScreen(
         Text("Data Tracker", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Section 1: Registration Status
         SectionHeader("Registration Status")
         RegistrationStatusCard(isRegistered = uiState.isRegistered)
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Section 2: Manual Registration
         SectionHeader("Manual Device Registration")
         OutlinedTextField(
             value = uiState.deviceName,
@@ -185,7 +172,10 @@ fun ControlPanelScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             if (uiState.isRegistering) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
             } else {
                 Text("Register / Update Name")
             }
@@ -198,7 +188,6 @@ fun ControlPanelScreen(
         )
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Section 3: Permissions
         SectionHeader("Permissions")
         Button(
             onClick = { permissionManager.requestPermissions(requiredPermissions) },
@@ -215,7 +204,6 @@ fun ControlPanelScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
 
-        // This list now correctly updates whenever onResume is called.
         requiredPermissions.forEach { permission ->
             PermissionStatusRow(
                 permissionName = permission.substringAfterLast('.').replace("_", " "),
@@ -237,21 +225,17 @@ fun RegistrationStatusCard(isRegistered: Boolean) {
             containerColor = if (isRegistered) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(
-                // ✅ CORRECTED: Both icons now use the Icons.Filled theme path.
-                imageVector = if (isRegistered) Icons.Filled.CheckCircle else Icons.Filled.Error,
-                contentDescription = "Status",
-                tint = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
-            )
-            Spacer(modifier = Modifier.width(16.dp))
+            val statusText = if (isRegistered) "Device is Registered" else "Device Not Registered"
+            val statusColor = if (isRegistered) Color(0xFF4CAF50) else Color.Red
             Text(
-                text = if (isRegistered) "Device is Registered" else "Device Not Registered",
+                text = statusText,
                 fontWeight = FontWeight.Bold,
-                color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                fontSize = 16.sp,
+                color = statusColor
             )
         }
     }
