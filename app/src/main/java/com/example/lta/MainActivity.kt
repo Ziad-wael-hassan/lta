@@ -242,7 +242,8 @@ fun RegistrationStatusCard(isRegistered: Boolean) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (isRegistered) Icons.Default.CheckCircle else Icons.Filled.Error, // Corrected this line
+                // ✅ CORRECTED: Both icons now use the Icons.Filled theme path.
+                imageVector = if (isRegistered) Icons.Filled.CheckCircle else Icons.Filled.Error,
                 contentDescription = "Status",
                 tint = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
             )
