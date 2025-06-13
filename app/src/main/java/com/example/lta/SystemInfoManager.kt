@@ -1,3 +1,4 @@
+// SystemInfoManager.kt (Corrected)
 package com.example.lta
 
 import android.content.Context
@@ -8,8 +9,17 @@ import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.telephony.TelephonyManager
 import android.os.Build
+import android.provider.Settings // ✅ ADD THIS IMPORT
 
 class SystemInfoManager(private val context: Context) {
+
+    /**
+     * Retrieves the unique, stable Android ID for the device.
+     */
+    fun getDeviceId(): String {
+        // ANDROID_ID is a unique string for each combination of app-signing key, user, and device.
+        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+    }
 
     fun getNetworkInfo(): String {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -38,13 +48,7 @@ class SystemInfoManager(private val context: Context) {
     fun getDeviceModel(): String {
         return Build.MODEL
     }
-    
 
-
-    fun getDeviceId(): String {
-        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-    }
-    
     fun getBatteryInfo(): String {
         val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { filter ->
             context.registerReceiver(null, filter)
@@ -64,8 +68,6 @@ class SystemInfoManager(private val context: Context) {
 
         val batteryPct: Float = level * 100 / scale.toFloat()
 
-        // FIXED: Added the safe call `?.` to the nullable batteryStatus receiver.
-        // And provided a default value in case it is null.
         val status: Int = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
         val isCharging: Boolean = status == BatteryManager.BATTERY_STATUS_CHARGING ||
                                  status == BatteryManager.BATTERY_STATUS_FULL
