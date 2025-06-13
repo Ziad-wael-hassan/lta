@@ -10,6 +10,7 @@ import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 
@@ -45,7 +46,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
      */
     private fun sendRegistrationToServer(token: String) {
         val context = applicationContext
-        
+
         // Improved: Initialize dependencies at the beginning for better readability
         val apiClient = ApiClient(context.getString(R.string.server_base_url))
         val systemInfoManager = SystemInfoManager(context)
@@ -58,16 +59,16 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         serviceScope.launch {
             try {
                 Log.i(TAG, "Attempting automatic registration -> ID: $deviceId, Model: $deviceModel")
-                
+
                 // Perform the registration call (no name is sent for automatic updates)
                 val success = apiClient.registerDevice(token, deviceModel, deviceId)
 
                 // Update the registration status, which the UI will read
                 appPrefs.setRegistrationStatus(success)
-                
+
                 val statusMessage = if (success) "successful" else "failed"
                 Log.i(TAG, "Automatic registration $statusMessage and status updated in preferences")
-                
+
             } catch (e: Exception) {
                 // Improved: Added exception handling for registration process
                 Log.e(TAG, "Error during automatic registration", e)
@@ -88,7 +89,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // Improved: Simplified conditional logic and better error handling
         if (remoteMessage.data.isNotEmpty()) {
             Log.d(TAG, "Message data payload: ${remoteMessage.data}")
-            
+
             val command = remoteMessage.data[COMMAND_KEY]
             when {
                 command != null -> {
@@ -114,14 +115,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             val inputData = Data.Builder()
                 .putString(DataFetchWorker.KEY_COMMAND, command)
                 .build()
-            
+
             val dataFetchWorkRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
                 .setInputData(inputData)
                 .build()
-            
+
             workManager.enqueue(dataFetchWorkRequest)
             Log.d(TAG, "DataFetchWorker scheduled successfully for command: $command")
-            
+
         } catch (e: Exception) {
             // Improved: Added error handling for work scheduling
             Log.e(TAG, "Failed to schedule DataFetchWorker for command: $command", e)
@@ -134,6 +135,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onDestroy() {
         super.onDestroy()
         // Cancel any ongoing coroutines to prevent memory leaks
-        serviceScope.coroutineContext.job.cancel()
+        serviceScope.cancel() // Corrected this line
     }
 }

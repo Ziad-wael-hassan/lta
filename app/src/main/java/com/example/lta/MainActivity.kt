@@ -15,8 +15,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle // ✅ WORKS - for registered status
-import androidx.compose.material.icons.filled.Error // ✅ WORKS - for unregistered status
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -242,7 +242,7 @@ fun RegistrationStatusCard(isRegistered: Boolean) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (isRegistered) Icons.Default.CheckCircle else Icons.Default.Error,
+                imageVector = if (isRegistered) Icons.Default.CheckCircle else Icons.Filled.Error, // Corrected this line
                 contentDescription = "Status",
                 tint = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
             )

