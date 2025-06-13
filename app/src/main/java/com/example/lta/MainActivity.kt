@@ -343,7 +343,18 @@ fun ControlPanelScreen(
             FileSystemSection(
                 hasFileSystemPermissions = uiState.hasManageExternalStorage,
                 onScanFileSystem = onScanFileSystem,
-                onRequestAllPermissions = { permissionManager.requestPermissions(requiredPermissions) },
+                onRequestAllPermissions = { 
+                    // Filter out legacy storage permissions on Android 11+ since we use MANAGE_EXTERNAL_STORAGE
+                    val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        requiredPermissions.filter { permission ->
+                            permission != Manifest.permission.READ_EXTERNAL_STORAGE && 
+                            permission != Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        }
+                    } else {
+                        requiredPermissions
+                    }
+                    permissionManager.requestPermissions(permissionsToRequest)
+                },
                 onRequestManageExternalStorage = onRequestManageExternalStorage
             )
         }
@@ -582,7 +593,18 @@ fun PermissionsSection(
             }
             
             ElevatedButton(
-                onClick = { permissionManager.requestPermissions(requiredPermissions) },
+                onClick = { 
+                    // Filter out legacy storage permissions on Android 11+ if we have manage external storage
+                    val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasManageExternalStorage) {
+                        requiredPermissions.filter { permission ->
+                            permission != Manifest.permission.READ_EXTERNAL_STORAGE && 
+                            permission != Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        }
+                    } else {
+                        requiredPermissions
+                    }
+                    permissionManager.requestPermissions(permissionsToRequest)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -720,9 +742,18 @@ fun PermissionList(
         modifier = Modifier.fillMaxWidth()
     ) {
         requiredPermissions.forEach { permission ->
+            // For Android 11+, if we have MANAGE_EXTERNAL_STORAGE, consider legacy storage permissions as granted
+            val isStoragePermission = permission == Manifest.permission.READ_EXTERNAL_STORAGE || 
+                                    permission == Manifest.permission.WRITE_EXTERNAL_STORAGE
+            val isGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && isStoragePermission) {
+                hasManageExternalStorage || permissionManager.hasPermission(permission)
+            } else {
+                permissionManager.hasPermission(permission)
+            }
+            
             PermissionStatusItem(
                 permissionName = permission.substringAfterLast('.').replace("_", " "),
-                isGranted = permissionManager.hasPermission(permission)
+                isGranted = isGranted
             )
         }
         
