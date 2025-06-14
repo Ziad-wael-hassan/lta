@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.lta.MainApplication
 import com.example.lta.data.repository.DeviceRepository
 import com.example.lta.util.SystemInfoManager
 import com.example.lta.worker.DataFetchWorker
@@ -117,7 +118,7 @@ class MainViewModel(
 class MainViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
-            val app = context.applicationContext as com.example.lta.MainApplication
+            val app = context.applicationContext as MainApplication
             @Suppress("UNCHECKED_CAST")
             return MainViewModel(
                 deviceRepository = app.container.deviceRepository,

@@ -1,9 +1,7 @@
 package com.example.lta.ui.main
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -117,16 +115,16 @@ fun AppHeader() {
                 modifier = Modifier.size(48.dp)
             )
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         Text(
             text = "Data Tracker",
             style = MaterialTheme.typography.headlineMedium.copy(
                 fontWeight = FontWeight.Bold
             )
         )
-        
+
         Text(
             text = "Monitor and manage your device data",
             style = MaterialTheme.typography.bodyMedium,
@@ -142,7 +140,7 @@ fun StatusSection(isRegistered: Boolean) {
     val statusColor = if (isRegistered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
     val statusText = if (isRegistered) "Device Registered" else "Registration Required"
     val statusDescription = if (isRegistered) "Your device is successfully registered and active" else "Please register your device to enable tracking"
-        
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -196,7 +194,7 @@ fun RegistrationSection(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
                 Icon(
-                    imageVector = Icons.Default.PhoneAndroid, 
+                    imageVector = Icons.Default.PhoneAndroid,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -221,9 +219,9 @@ fun RegistrationSection(
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 )
             )
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             Button(
                 onClick = onRegisterClick,
                 enabled = !isRegistering,
@@ -249,9 +247,9 @@ fun RegistrationSection(
                     Text("Register Device", style = MaterialTheme.typography.titleSmall)
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Text(
                 "This name will help you identify your device in the system",
                 style = MaterialTheme.typography.bodySmall,
@@ -274,7 +272,7 @@ fun PermissionsSection(
     onRequestManageExternalStorage: () -> Unit
 ) {
     val context = LocalContext.current
-    
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -293,7 +291,7 @@ fun PermissionsSection(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
                 )
             }
-            
+
             ElevatedButton(
                 onClick = {
                     val permissionsToRequest = if (hasManageExternalStorage) filterStoragePermissions(requiredPermissions) else requiredPermissions
@@ -306,9 +304,9 @@ fun PermissionsSection(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Grant Standard Permissions")
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 PermissionButton(
                     text = "Background Location Access",
@@ -321,7 +319,7 @@ fun PermissionsSection(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
-            
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 PermissionButton(
                     text = "All Files Access",
@@ -334,24 +332,24 @@ fun PermissionsSection(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
-            
+
             PermissionButton(
                 text = "Notification Access",
                 icon = Icons.Default.Notifications,
                 isGranted = isNotificationListenerEnabled,
                 onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
             )
-            
+
             Spacer(modifier = Modifier.height(20.dp))
-            
+
             Text(
                 "Permission Status",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            
+
             HorizontalDivider(modifier = Modifier.padding(bottom = 16.dp))
-            
+
             PermissionList(
                 permissionManager = permissionManager,
                 requiredPermissions = requiredPermissions,
@@ -408,15 +406,15 @@ fun PermissionList(
             }
             PermissionStatusItem(permissionName = permission.substringAfterLast('.').replace("_", " "), isGranted = isGranted)
         }
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             PermissionStatusItem(permissionName = "BACKGROUND LOCATION", isGranted = hasBackgroundLocation)
         }
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             PermissionStatusItem(permissionName = "ALL FILES ACCESS", isGranted = hasManageExternalStorage)
         }
-        
+
         PermissionStatusItem(permissionName = "NOTIFICATION LISTENER", isGranted = isNotificationListenerEnabled)
     }
 }
@@ -424,7 +422,7 @@ fun PermissionList(
 @Composable
 fun PermissionStatusItem(permissionName: String, isGranted: Boolean) {
     val statusColor = if (isGranted) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
-    
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -440,7 +438,7 @@ fun PermissionStatusItem(permissionName: String, isGranted: Boolean) {
             Spacer(modifier = Modifier.width(12.dp))
             Text(text = permissionName, style = MaterialTheme.typography.bodyMedium)
         }
-        
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = if (isGranted) "GRANTED" else "DENIED",
