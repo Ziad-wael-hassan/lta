@@ -1,17 +1,20 @@
-// AppDatabase.kt
 package com.example.lta.data.local
 
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.lta.data.local.model.CallLogEntity
+import com.example.lta.data.local.model.ContactEntity
+import com.example.lta.data.local.model.NotificationEntity
+import com.example.lta.data.local.model.SmsEntity
 
 @Database(entities = [
     NotificationEntity::class,
     SmsEntity::class,
     CallLogEntity::class,
     ContactEntity::class
-], version = 2, exportSchema = false) // Version incremented for new tables
+], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun notificationDao(): NotificationDao
@@ -30,8 +33,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "lta_app_database"
                 )
-                // Using destructive migration for simplicity during development.
-                // For production, you'd want a proper migration strategy.
+                // Using destructive migration for simplicity. For production,
+                // a proper migration strategy would be required.
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
