@@ -14,7 +14,6 @@ import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.example.lta.ui.theme.LtaTheme
 import com.example.lta.util.PermissionManager
@@ -59,12 +58,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             LtaTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    val uiState by viewModel.uiState
+                    // CORRECTED: Changed `by` to `=` to correctly observe the state value
+                    val uiState = viewModel.uiState
                     
                     // Show registration status toasts
                     LaunchedEffect(uiState.registrationMessage) {
-                        uiState.registrationMessage?.let {
-                            Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show()
+                        uiState.registrationMessage?.let { message ->
+                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
                             viewModel.clearRegistrationMessage()
                         }
                     }

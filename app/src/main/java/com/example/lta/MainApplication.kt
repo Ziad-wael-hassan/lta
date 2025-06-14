@@ -28,7 +28,7 @@ class MainApplication : Application(), Configuration.Provider {
         super.onCreate()
         container = DefaultAppContainer(this)
         Log.d("MainApplication", "App container initialized.")
-        
+
         createNotificationChannels()
         initializeTokenMonitoring()
     }
@@ -51,12 +51,12 @@ class MainApplication : Application(), Configuration.Provider {
             notificationManager.createNotificationChannels(listOf(locationChannel, appChannel))
         }
     }
-    
+
     private fun initializeTokenMonitoring() {
         val tokenCheckWork = PeriodicWorkRequestBuilder<TokenCheckWorker>(
             BootReceiver.TOKEN_CHECK_INTERVAL_HOURS, TimeUnit.HOURS
         ).build()
-        
+
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             BootReceiver.TOKEN_MONITOR_WORK_NAME,
             ExistingPeriodicWorkPolicy.KEEP,
