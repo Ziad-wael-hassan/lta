@@ -58,10 +58,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             LtaTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    // CORRECTED: Changed `by` to `=` to correctly observe the state value
                     val uiState = viewModel.uiState
                     
-                    // Show registration status toasts
                     LaunchedEffect(uiState.registrationMessage) {
                         uiState.registrationMessage?.let { message ->
                             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
