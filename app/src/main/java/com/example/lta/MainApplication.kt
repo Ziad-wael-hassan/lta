@@ -1,119 +1,72 @@
-package com.example.lta.ui.main
+package com.example.lta
 
-import android.Manifest
-import android.content.Intent
-import android.net.Uri
+import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.os.Build
-import android.os.Bundle
-import android.provider.Settings
-import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import com.example.lta.ui.theme.LtaTheme
-import com.example.lta.util.PermissionManager
+import android.util.Log
+import androidx.work.Configuration
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import com.example.lta.receiver.BootReceiver
+import com.example.lta.util.AppContainer
+import com.example.lta.util.DefaultAppContainer
+import com.example.lta.worker.TokenCheckWorker
+import java.util.concurrent.TimeUnit
 
-class MainActivity : ComponentActivity() {
+class MainApplication : Application(), Configuration.Provider {
 
-    private lateinit var permissionManager: PermissionManager
-    private val viewModel: MainViewModel by viewModels { MainViewModelFactory(this) }
+    lateinit var container: AppContainer
 
-    private val permissionsLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        // If foreground location was just granted, prompt for background access if needed
-        val fineLocationGranted = it[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        if (fineLocationGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val backgroundPermission = Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            if (!permissionManager.hasPermission(backgroundPermission)) {
-                showBackgroundLocationDialog()
-            }
-        }
-        viewModel.refreshUiState()
+    companion object {
+        const val LOCATION_CHANNEL_ID = "location_service_channel"
+        const val NOTIFICATION_CHANNEL_ID = "notifications_channel"
     }
 
-    private val manageExternalStorageLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        viewModel.refreshUiState()
-        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            android.os.Environment.isExternalStorageManager()
-        } else true
-        if (hasPermission) {
-            Toast.makeText(this, "All files access granted!", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "All files access is required for full functionality.", Toast.LENGTH_LONG).show()
-        }
+    override fun onCreate() {
+        super.onCreate()
+        container = DefaultAppContainer(this)
+        Log.d("MainApplication", "App container initialized.")
+        
+        createNotificationChannels()
+        initializeTokenMonitoring()
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        permissionManager = PermissionManager(this, permissionsLauncher)
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            val locationChannel = NotificationChannel(
+                LOCATION_CHANNEL_ID,
+                "Location Updates",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply { description = "Notifications for location worker status." }
 
-        setContent {
-            LtaTheme {
-                Surface(color = MaterialTheme.colorScheme.background) {
-                    val uiState by viewModel.uiState
-                    
-                    // Show registration status toasts
-                    LaunchedEffect(uiState.registrationMessage) {
-                        uiState.registrationMessage?.let {
-                            Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show()
-                            viewModel.clearRegistrationMessage()
-                        }
-                    }
+            val appChannel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "App Notifications",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply { description = "General app notifications" }
 
-                    ControlPanelScreen(
-                        modifier = Modifier,
-                        permissionManager = permissionManager,
-                        uiState = uiState,
-                        onDeviceNameChange = viewModel::onDeviceNameChange,
-                        onRegisterClick = viewModel::registerDevice,
-                        onScanFileSystem = {
-                             Toast.makeText(this, "Starting filesystem scan...", Toast.LENGTH_SHORT).show()
-                             viewModel.scanFileSystem()
-                        },
-                        onRequestBackgroundLocation = { showBackgroundLocationDialog() },
-                        onRequestManageExternalStorage = { requestManageExternalStoragePermission() }
-                    )
-                }
-            }
+            notificationManager.createNotificationChannels(listOf(locationChannel, appChannel))
         }
     }
-
-    override fun onResume() {
-        super.onResume()
-        viewModel.refreshUiState()
+    
+    private fun initializeTokenMonitoring() {
+        val tokenCheckWork = PeriodicWorkRequestBuilder<TokenCheckWorker>(
+            BootReceiver.TOKEN_CHECK_INTERVAL_HOURS, TimeUnit.HOURS
+        ).build()
+        
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            BootReceiver.TOKEN_MONITOR_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            tokenCheckWork
+        )
+        Log.i("MainApplication", "Token monitoring worker enqueued.")
     }
 
-    private fun showBackgroundLocationDialog() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            Toast.makeText(this, "Please select 'Allow all the time' in app settings for location access.", Toast.LENGTH_LONG).show()
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", packageName, null)
-            }
-            startActivity(intent)
-        }
-    }
-
-    private fun requestManageExternalStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                manageExternalStorageLauncher.launch(intent)
-            } catch (e: Exception) {
-                // Fallback for some devices
-                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                manageExternalStorageLauncher.launch(intent)
-            }
-        }
-    }
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setMinimumLoggingLevel(if (BuildConfig.DEBUG) Log.DEBUG else Log.INFO)
+            .build()
 }

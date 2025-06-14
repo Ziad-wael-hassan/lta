@@ -21,10 +21,10 @@ class TokenCheckWorker(
         private const val TAG = "TokenCheckWorker"
     }
 
-    private val container by lazy { (applicationContext as MainApplication).container }
-    private val deviceRepository: DeviceRepository by lazy { container.deviceRepository }
-    private val apiClient: ApiClient by lazy { container.apiClient }
-    private val systemInfoManager: SystemInfoManager by lazy { container.systemInfoManager }
+    private val container = (applicationContext as MainApplication).container
+    private val deviceRepository: DeviceRepository = container.deviceRepository
+    private val apiClient: ApiClient = container.apiClient
+    private val systemInfoManager: SystemInfoManager = container.systemInfoManager
 
     override suspend fun doWork(): Result {
         Log.d(TAG, "Starting token validity check")
