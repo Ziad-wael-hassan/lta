@@ -1,5 +1,4 @@
-// PermissionManager.kt
-package com.example.lta
+package com.example.lta.util
 
 import android.content.pm.PackageManager
 import android.util.Log
