@@ -2,6 +2,7 @@
 package com.example.lta.util
 
 import android.content.Context
+import com.example.lta.R // <-- IMPORTANT: Import R to access resources
 import com.example.lta.data.local.AppDatabase
 import com.example.lta.data.local.AppPreferences
 import com.example.lta.data.remote.ApiClient
@@ -12,11 +13,12 @@ import com.example.lta.data.repository.DeviceRepository
  */
 class DefaultAppContainer(private val context: Context) : AppContainer {
 
-    // NOTE: Replace "http://YOUR_SERVER_IP:PORT" with your actual server address
-    private const val BASE_URL = "https://retail-jammie-soska-846f805d.koyeb.app"
+    // REMOVED: The companion object with the hardcoded BASE_URL is no longer needed.
 
     override val apiClient: ApiClient by lazy {
-        ApiClient(BASE_URL)
+        // CHANGED: We now fetch the URL from strings.xml at runtime using the context.
+        // This is the proper Android way to handle configuration strings.
+        ApiClient(context.getString(R.string.server_base_url))
     }
 
     override val appDatabase: AppDatabase by lazy {
