@@ -4,6 +4,10 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.example.lta.data.local.model.CallLogEntity
+import com.example.lta.data.local.model.ContactEntity
+import com.example.lta.data.local.model.NotificationEntity
+import com.example.lta.data.local.model.SmsEntity
 
 @Dao
 interface SmsDao {
@@ -50,7 +54,6 @@ interface ContactDao {
     suspend fun getAllContacts(): List<ContactEntity>
 }
 
-// Keep NotificationDao here or in its own file
 @Dao
 interface NotificationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
