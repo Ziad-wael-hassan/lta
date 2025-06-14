@@ -16,7 +16,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import com.example.lta.ui.theme.LtaTheme
-import com.example.lta.PermissionManager
+import com.example.lta.util.PermissionManager
 
 class MainActivity : ComponentActivity() {
 
