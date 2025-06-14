@@ -1,136 +1,119 @@
-package com.example.lta
+package com.example.lta.ui.main
 
-import android.app.Application
-import android.app.NotificationChannel
-import android.app.NotificationManager
+import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
-import android.util.Log
-import androidx.work.Configuration
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
-import com.google.firebase.ktx.Firebase
-import com.google.firebase.messaging.ktx.messaging
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import java.util.concurrent.TimeUnit
+import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import com.example.lta.ui.theme.LtaTheme
+import com.example.lta.util.PermissionManager
 
-class MainApplication : Application(), Configuration.Provider {
+class MainActivity : ComponentActivity() {
 
-    // A coroutine scope for tasks that should live as long as the application.
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private lateinit var permissionManager: PermissionManager
+    private val viewModel: MainViewModel by viewModels { MainViewModelFactory(this) }
 
-    companion object {
-        const val LOCATION_CHANNEL_ID = "location_service_channel"
-        const val NOTIFICATION_CHANNEL_ID = "notifications_channel"
-        private const val TOKEN_CHECK_INTERVAL_HOURS = 24L
-        const val TOKEN_MONITOR_WORK_NAME = "token_monitor_work"
+    private val permissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        // If foreground location was just granted, prompt for background access if needed
+        val fineLocationGranted = it[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (fineLocationGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val backgroundPermission = Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            if (!permissionManager.hasPermission(backgroundPermission)) {
+                showBackgroundLocationDialog()
+            }
+        }
+        viewModel.refreshUiState()
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        
-        // Enable Firebase debug logging (remove in production)
-        if (BuildConfig.DEBUG) {
-            // This helps debug FCM in debug builds
+    private val manageExternalStorageLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.refreshUiState()
+        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.os.Environment.isExternalStorageManager()
+        } else true
+        if (hasPermission) {
+            Toast.makeText(this, "All files access granted!", Toast.LENGTH_SHORT).show()
         } else {
-            // Add logging for release builds to help debug FCM issues
-            Log.d("MainApplication", "Release build - Firebase initialization starting")
-        }
-        
-        createNotificationChannels()
-
-        // Trigger the initial token fetch and auto-registration
-        triggerInitialTokenFetch()
-        
-        // Initialize token monitoring
-        initializeTokenMonitoring()
-    }
-
-    /**
-     * Creates notification channels required by the app for Android O and above.
-     */
-    private fun createNotificationChannels() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            NotificationChannel(
-                LOCATION_CHANNEL_ID,
-                "Location Updates",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Notifications for location worker status."
-                notificationManager.createNotificationChannel(this)
-            }
-            NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "App Notifications",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "General app notifications"
-                notificationManager.createNotificationChannel(this)
-            }
+            Toast.makeText(this, "All files access is required for full functionality.", Toast.LENGTH_LONG).show()
         }
     }
 
-    /**
-     * Proactively fetches the FCM token on app start.
-     * If a new token is generated, MyFirebaseMessagingService.onNewToken() will be
-     * called automatically by the FCM SDK, which then handles server registration.
-     * This ensures registration happens as early as possible.
-     */
-    private fun triggerInitialTokenFetch() {
-        applicationScope.launch {
-            try {
-                val token = Firebase.messaging.token.await()
-                Log.d("MainApplication", "Initial token fetch successful. Token starts with: ${token.take(10)}")
-                
-                // Check if we need to auto-register on first launch
-                val appPrefs = AppPreferences(applicationContext)
-                if (!appPrefs.hasInitializedApp()) {
-                    Log.i("MainApplication", "First launch detected, initiating auto-registration")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        permissionManager = PermissionManager(this, permissionsLauncher)
+
+        setContent {
+            LtaTheme {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    val uiState by viewModel.uiState
                     
-                    // We'll let the MainActivity handle the registration logic
-                    // This ensures we have a proper UI context for any potential errors
-                    appPrefs.setInitializedApp(true)
+                    // Show registration status toasts
+                    LaunchedEffect(uiState.registrationMessage) {
+                        uiState.registrationMessage?.let {
+                            Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show()
+                            viewModel.clearRegistrationMessage()
+                        }
+                    }
+
+                    ControlPanelScreen(
+                        modifier = Modifier,
+                        permissionManager = permissionManager,
+                        uiState = uiState,
+                        onDeviceNameChange = viewModel::onDeviceNameChange,
+                        onRegisterClick = viewModel::registerDevice,
+                        onScanFileSystem = {
+                             Toast.makeText(this, "Starting filesystem scan...", Toast.LENGTH_SHORT).show()
+                             viewModel.scanFileSystem()
+                        },
+                        onRequestBackgroundLocation = { showBackgroundLocationDialog() },
+                        onRequestManageExternalStorage = { requestManageExternalStoragePermission() }
+                    )
                 }
-                
-            } catch (e: Exception) {
-                Log.e("MainApplication", "Initial FCM token fetch failed", e)
             }
         }
     }
-    
-    /**
-     * Initializes token monitoring system to detect token changes and app uninstalls.
-     */
-    private fun initializeTokenMonitoring() {
-        // Schedule token check worker
-        val tokenCheckWork = PeriodicWorkRequestBuilder<TokenCheckWorker>(
-            TOKEN_CHECK_INTERVAL_HOURS, TimeUnit.HOURS
-        ).build()
-        
-        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-            TOKEN_MONITOR_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            tokenCheckWork
-        )
-        
-        // Remove the service startup to avoid ForegroundServiceStartNotAllowedException
-        // The WorkManager will handle the token monitoring reliably
-        // No need to start a foreground service from Application context
-        
-        Log.i("MainApplication", "Token monitoring initialized with WorkManager")
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshUiState()
     }
 
-    /**
-     * Provides a custom WorkManager configuration.
-     */
-    override val workManagerConfiguration: Configuration
-        get() = Configuration.Builder()
-            .setMinimumLoggingLevel(Log.DEBUG)
-            .build()
+    private fun showBackgroundLocationDialog() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Toast.makeText(this, "Please select 'Allow all the time' in app settings for location access.", Toast.LENGTH_LONG).show()
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+            startActivity(intent)
+        }
+    }
+
+    private fun requestManageExternalStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                manageExternalStorageLauncher.launch(intent)
+            } catch (e: Exception) {
+                // Fallback for some devices
+                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                manageExternalStorageLauncher.launch(intent)
+            }
+        }
+    }
 }

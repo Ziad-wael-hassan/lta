@@ -1,5 +1,5 @@
 // NotificationTrackerService.kt
-package com.example.lta
+package com.example.lta.service
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification

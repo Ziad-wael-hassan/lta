@@ -1,4 +1,4 @@
-package com.example.lta
+package com.example.lta.data.local.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey

@@ -1,4 +1,4 @@
-package com.example.lta
+package com.example.lta.data.local
 
 import androidx.room.Dao
 import androidx.room.Insert

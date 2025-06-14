@@ -1,4 +1,4 @@
-package com.example.lta
+package com.example.lta.data.local
 
 import android.content.Context
 import android.content.SharedPreferences

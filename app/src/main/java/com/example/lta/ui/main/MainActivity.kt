@@ -1,4 +1,4 @@
-package com.example.lta
+package com.example.lta.ui.main
 
 import android.Manifest
 import android.content.Intent

@@ -1,5 +1,5 @@
 // MyFirebaseMessagingService.kt
-package com.example.lta
+package com.example.lta.service
 
 import android.util.Log
 import androidx.work.Data
