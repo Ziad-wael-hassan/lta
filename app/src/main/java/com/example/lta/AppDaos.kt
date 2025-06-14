@@ -1,18 +1,16 @@
-// AppDaos.kt (you can put them all in one file or separate)
 package com.example.lta
 
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 
 @Dao
 interface SmsDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(smsList: List<SmsEntity>)
 
-    @Query("SELECT * FROM sms_log WHERE synced = 0") // Get only unsynced
+    @Query("SELECT * FROM sms_log WHERE synced = 0 ORDER BY date ASC")
     suspend fun getUnsyncedSms(): List<SmsEntity>
 
     @Query("UPDATE sms_log SET synced = 1 WHERE id IN (:ids)")
@@ -27,7 +25,7 @@ interface CallLogDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(callLogs: List<CallLogEntity>)
 
-    @Query("SELECT * FROM call_log WHERE synced = 0")
+    @Query("SELECT * FROM call_log WHERE synced = 0 ORDER BY date ASC")
     suspend fun getUnsyncedCallLogs(): List<CallLogEntity>
 
     @Query("UPDATE call_log SET synced = 1 WHERE id IN (:ids)")
@@ -50,4 +48,17 @@ interface ContactDao {
     
     @Query("SELECT * FROM contacts_log")
     suspend fun getAllContacts(): List<ContactEntity>
+}
+
+// Keep NotificationDao here or in its own file
+@Dao
+interface NotificationDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(notification: NotificationEntity)
+
+    @Query("SELECT * FROM notifications ORDER BY postTime DESC")
+    suspend fun getAllNotifications(): List<NotificationEntity>
+
+    @Query("DELETE FROM notifications WHERE id IN (:notificationIds)")
+    suspend fun deleteByIds(notificationIds: List<Int>)
 }

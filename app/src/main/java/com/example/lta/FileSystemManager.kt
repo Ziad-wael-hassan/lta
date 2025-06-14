@@ -1,3 +1,4 @@
+// FileSystemManager.kt
 package com.example.lta
 
 import android.Manifest
@@ -12,13 +13,9 @@ import kotlinx.coroutines.withContext
 import okhttp3.ResponseBody
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 
-/**
- * Data class to represent file system information
- */
 data class FileSystemItem(
     val path: String,
     val name: String,
@@ -29,9 +26,6 @@ data class FileSystemItem(
     val canWrite: Boolean
 )
 
-/**
- * Data class for file system scan results
- */
 data class FileSystemScanResult(
     val paths: List<FileSystemItem>,
     val totalFiles: Int,
@@ -40,340 +34,177 @@ data class FileSystemScanResult(
     val scanTimestamp: Long
 )
 
-/**
- * Manages file system operations including scanning paths, 
- * uploading file lists, and downloading files from server
- */
 class FileSystemManager(private val context: Context) {
 
     companion object {
         private const val TAG = "FileSystemManager"
         private const val MAX_SCAN_DEPTH = 10
-        private const val MAX_FILES_PER_SCAN = 10000
+        private const val MAX_FILES_PER_SCAN = 15000 // A safeguard against runaway scans
         private const val DOWNLOADS_FOLDER = "LTA_Downloads"
     }
 
     /**
-     * Checks if the app has the necessary file system permissions
+     * Checks for the appropriate file system permissions based on Android version.
      */
     fun hasFileSystemPermissions(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ (API 33+) - check for media permissions
-            hasPermission(Manifest.permission.READ_MEDIA_IMAGES) &&
-            hasPermission(Manifest.permission.READ_MEDIA_VIDEO) &&
-            hasPermission(Manifest.permission.READ_MEDIA_AUDIO)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ (API 30+) - check for legacy storage permission
-            hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE) ||
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {
-            // Below Android 11 - check for legacy storage permissions
-            hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE) &&
-            hasPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            hasLegacyPermission(Manifest.permission.READ_EXTERNAL_STORAGE) &&
+            hasLegacyPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 
-    private fun hasPermission(permission: String): Boolean {
+    private fun hasLegacyPermission(permission: String): Boolean {
         return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     }
 
     /**
-     * Scans the file system and returns a list of accessible paths
+     * Performs a comprehensive scan of the device's external storage.
+     * @return A FileSystemScanResult containing all found items.
      */
-    suspend fun scanFileSystem(
-        startPath: String? = null,
-        includeSystemFiles: Boolean = false,
-        maxDepth: Int = MAX_SCAN_DEPTH
-    ): FileSystemScanResult = withContext(Dispatchers.IO) {
+    suspend fun scanFileSystem(): FileSystemScanResult = withContext(Dispatchers.IO) {
+        if (!hasFileSystemPermissions()) {
+            Log.w(TAG, "Cannot scan file system: Permissions not granted.")
+            return@withContext FileSystemScanResult(emptyList(), 0, 0, 0, System.currentTimeMillis())
+        }
+
         val paths = mutableListOf<FileSystemItem>()
-        var totalFiles = 0
-        var totalDirectories = 0
-        var totalSize = 0L
+        val rootDir = Environment.getExternalStorageDirectory()
 
-        try {
-            if (!hasFileSystemPermissions()) {
-                Log.w(TAG, "File system permissions not granted")
-                return@withContext FileSystemScanResult(
-                    paths = emptyList(),
-                    totalFiles = 0,
-                    totalDirectories = 0,
-                    totalSize = 0,
-                    scanTimestamp = System.currentTimeMillis()
-                )
-            }
-
-            val rootDirs = if (startPath != null) {
-                listOf(File(startPath))
-            } else {
-                getAccessibleRootDirectories()
-            }
-
-            for (rootDir in rootDirs) {
-                if (paths.size >= MAX_FILES_PER_SCAN) break
-                scanDirectory(
-                    directory = rootDir,
-                    paths = paths,
-                    includeSystemFiles = includeSystemFiles,
-                    currentDepth = 0,
-                    maxDepth = maxDepth
-                )
-            }
-
-            // Calculate statistics
-            paths.forEach { item ->
-                if (item.isDirectory) {
-                    totalDirectories++
-                } else {
-                    totalFiles++
-                    totalSize += item.size
-                }
-            }
-
-            Log.i(TAG, "File system scan completed: $totalFiles files, $totalDirectories directories, ${totalSize / 1024 / 1024}MB")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during file system scan", e)
-        }
-
-        FileSystemScanResult(
-            paths = paths,
-            totalFiles = totalFiles,
-            totalDirectories = totalDirectories,
-            totalSize = totalSize,
-            scanTimestamp = System.currentTimeMillis()
-        )
+        Log.i(TAG, "Starting file system scan from root: ${rootDir.absolutePath}")
+        
+        scanDirectoryRecursive(rootDir, paths, 0)
+        
+        val totalFiles = paths.count { !it.isDirectory }
+        val totalDirs = paths.count { it.isDirectory }
+        val totalSize = paths.sumOf { it.size }
+        
+        Log.i(TAG, "Scan completed. Found $totalFiles files, $totalDirs directories. Total size: ${formatFileSize(totalSize)}")
+        
+        FileSystemScanResult(paths, totalFiles, totalDirs, totalSize, System.currentTimeMillis())
     }
 
     /**
-     * Recursively scans a directory and adds files to the paths list
+     * Recursively scans a directory, adding its contents to the list while respecting depth and file limits.
      */
-    private fun scanDirectory(
-        directory: File,
-        paths: MutableList<FileSystemItem>,
-        includeSystemFiles: Boolean,
-        currentDepth: Int,
-        maxDepth: Int
-    ) {
-        if (currentDepth >= maxDepth || paths.size >= MAX_FILES_PER_SCAN) return
+    private fun scanDirectoryRecursive(directory: File, paths: MutableList<FileSystemItem>, depth: Int) {
+        if (depth > MAX_SCAN_DEPTH || paths.size >= MAX_FILES_PER_SCAN) return
 
-        try {
-            if (!directory.exists() || !directory.canRead()) return
+        if (!directory.exists() || !directory.canRead() || isSystemDirectory(directory)) return
 
-            // Skip system directories unless explicitly requested
-            if (!includeSystemFiles && isSystemDirectory(directory)) return
+        val files = directory.listFiles()
+        if (files.isNullOrEmpty()) return
 
-            val files = directory.listFiles() ?: return
+        for (file in files) {
+            if (paths.size >= MAX_FILES_PER_SCAN) break
+            if (file.isHidden) continue
 
-            for (file in files) {
-                if (paths.size >= MAX_FILES_PER_SCAN) break
-
-                try {
-                    // Skip hidden files and system files unless requested
-                    if (!includeSystemFiles && (file.isHidden || file.name.startsWith("."))) continue
-
-                    val fileSystemItem = FileSystemItem(
-                        path = file.absolutePath,
-                        name = file.name,
-                        isDirectory = file.isDirectory,
-                        size = if (file.isFile) file.length() else 0,
-                        lastModified = file.lastModified(),
-                        canRead = file.canRead(),
-                        canWrite = file.canWrite()
-                    )
-
-                    paths.add(fileSystemItem)
-
-                    // Recursively scan subdirectories
-                    if (file.isDirectory) {
-                        scanDirectory(file, paths, includeSystemFiles, currentDepth + 1, maxDepth)
-                    }
-                } catch (e: SecurityException) {
-                    Log.d(TAG, "Access denied to file: ${file.absolutePath}")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error scanning file: ${file.absolutePath}", e)
+            try {
+                paths.add(createFileSystemItem(file))
+                if (file.isDirectory) {
+                    scanDirectoryRecursive(file, paths, depth + 1)
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not process file: ${file.absolutePath}", e)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error scanning directory: ${directory.absolutePath}", e)
         }
     }
 
     /**
-     * Gets list of accessible root directories
-     */
-    private fun getAccessibleRootDirectories(): List<File> {
-        val directories = mutableListOf<File>()
-
-        try {
-            // Internal storage
-            directories.add(Environment.getExternalStorageDirectory())
-
-            // Common directories
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)?.let {
-                directories.add(it)
-            }
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)?.let {
-                directories.add(it)
-            }
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)?.let {
-                directories.add(it)
-            }
-
-            // External storage (SD cards, etc.)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                context.getExternalFilesDirs(null)?.forEach { file ->
-                    file?.let { directories.add(it) }
-                }
-            }
-
-        } catch (e: Exception) {
-            Log.w(TAG, "Error getting root directories", e)
-        }
-
-        return directories.filter { it.exists() && it.canRead() }.distinct()
-    }
-
-    /**
-     * Checks if a directory is a system directory that should be avoided
+     * Checks if a directory is a protected or uninteresting system path.
      */
     private fun isSystemDirectory(directory: File): Boolean {
-        val path = directory.absolutePath.lowercase()
-        val systemPaths = listOf(
-            "/system", "/proc", "/dev", "/sys", "/vendor", "/apex",
-            "/data/system", "/android_metadata", "/lost+found"
+        val path = directory.absolutePath.lowercase(Locale.ROOT)
+        return path.startsWith("/proc") || path.startsWith("/sys") ||
+               path.startsWith("/dev") || path.startsWith("/data/app") ||
+               (path.startsWith("/storage/emulated/0/android") && !path.contains("obb") && !path.contains("data"))
+    }
+    
+    /**
+     * Converts a File object to a FileSystemItem data class.
+     */
+    private fun createFileSystemItem(file: File): FileSystemItem {
+        return FileSystemItem(
+            path = file.absolutePath,
+            name = file.name,
+            isDirectory = file.isDirectory,
+            size = if (file.isFile) file.length() else 0L,
+            lastModified = file.lastModified(),
+            canRead = file.canRead(),
+            canWrite = file.canWrite()
         )
-        return systemPaths.any { path.startsWith(it) }
     }
 
     /**
-     * Creates a formatted string of file system paths for API upload
+     * Formats the scan results into a multi-line string suitable for uploading.
      */
     fun formatPathsForUpload(scanResult: FileSystemScanResult): String {
         val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val timestamp = formatter.format(Date(scanResult.scanTimestamp))
-
+        
         return buildString {
-            appendLine("📁 File System Scan Report")
+            appendLine("--- File System Report ---")
             appendLine("Timestamp: $timestamp")
-            appendLine("Total Files: ${scanResult.totalFiles}")
-            appendLine("Total Directories: ${scanResult.totalDirectories}")
-            appendLine("Total Size: ${formatFileSize(scanResult.totalSize)}")
-            appendLine("Scanned Items: ${scanResult.paths.size}")
-            appendLine()
-            appendLine("Path,Name,Type,Size,Last Modified,Permissions")
-
+            appendLine("Files: ${scanResult.totalFiles}, Directories: ${scanResult.totalDirectories}, Size: ${formatFileSize(scanResult.totalSize)}")
+            appendLine("--- Paths ---")
+            appendLine("Type,Size,Modified,Perm,Path") // Header
+            
             scanResult.paths.forEach { item ->
-                val type = if (item.isDirectory) "DIR" else "FILE"
-                val size = if (item.isDirectory) "-" else item.size.toString()
-                val lastModified = formatter.format(Date(item.lastModified))
-                val permissions = buildString {
-                    if (item.canRead) append("R")
-                    if (item.canWrite) append("W")
-                }
-
-                appendLine("\"${item.path}\",\"${item.name}\",$type,$size,$lastModified,$permissions")
+                val type = if (item.isDirectory) "D" else "F"
+                val size = item.size.toString()
+                val modified = formatter.format(Date(item.lastModified))
+                val perms = (if(item.canRead) "R" else "") + (if(item.canWrite) "W" else "")
+                appendLine("$type,$size,$modified,$perms,\"${item.path}\"")
             }
         }
     }
 
     /**
-     * Downloads a file from the server using the ApiClient
+     * Downloads a file from the server to a dedicated app folder.
      */
-    suspend fun downloadFile(
-        apiClient: ApiClient,
-        serverFilePath: String,
-        localFileName: String? = null
-    ): File? = withContext(Dispatchers.IO) {
+    suspend fun downloadFile(apiClient: ApiClient, serverFilePath: String): File? = withContext(Dispatchers.IO) {
+        if (!hasFileSystemPermissions()) {
+            Log.e(TAG, "Cannot download: Storage permissions not granted.")
+            return@withContext null
+        }
+        
         try {
-            if (!hasFileSystemPermissions()) {
-                Log.e(TAG, "File system permissions not granted for download")
-                return@withContext null
-            }
-
-            val downloadsDir = getDownloadsDirectory()
+            val downloadsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), DOWNLOADS_FOLDER)
             if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
-                Log.e(TAG, "Failed to create downloads directory")
+                Log.e(TAG, "Failed to create downloads directory: ${downloadsDir.absolutePath}")
                 return@withContext null
             }
-
-            val fileName = localFileName ?: File(serverFilePath).name
-            val localFile = File(downloadsDir, fileName)
-
+            
+            val localFile = File(downloadsDir, File(serverFilePath).name)
             val responseBody = apiClient.downloadFile(serverFilePath)
-            if (responseBody != null) {
-                saveResponseBodyToFile(responseBody, localFile)
-                Log.i(TAG, "File downloaded successfully: ${localFile.absolutePath}")
+            
+            responseBody?.use { body ->
+                FileOutputStream(localFile).use { output ->
+                    body.byteStream().copyTo(output)
+                }
+                Log.i(TAG, "File downloaded successfully to: ${localFile.absolutePath}")
                 localFile
-            } else {
-                Log.e(TAG, "Failed to download file from server")
+            } ?: run {
+                Log.e(TAG, "Download failed: Response body was null for path: $serverFilePath")
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error downloading file: $serverFilePath", e)
+            Log.e(TAG, "Error during file download for path: $serverFilePath", e)
             null
         }
     }
 
     /**
-     * Saves ResponseBody to a local file
-     */
-    private fun saveResponseBodyToFile(responseBody: ResponseBody, file: File) {
-        responseBody.byteStream().use { inputStream ->
-            FileOutputStream(file).use { outputStream ->
-                inputStream.copyTo(outputStream)
-            }
-        }
-    }
-
-    /**
-     * Gets the downloads directory for the app
-     */
-    private fun getDownloadsDirectory(): File {
-        return File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), DOWNLOADS_FOLDER)
-    }
-
-    /**
-     * Formats file size in human-readable format
+     * Formats a file size in bytes to a human-readable string (KB, MB, GB).
      */
     private fun formatFileSize(bytes: Long): String {
         if (bytes < 1024) return "$bytes B"
         val kb = bytes / 1024.0
-        if (kb < 1024) return "%.1f KB".format(kb)
+        if (kb < 1024) return "%.2f KB".format(kb)
         val mb = kb / 1024.0
-        if (mb < 1024) return "%.1f MB".format(mb)
+        if (mb < 1024) return "%.2f MB".format(mb)
         val gb = mb / 1024.0
-        return "%.1f GB".format(gb)
+        return "%.2f GB".format(gb)
     }
-
-    /**
-     * Gets a specific file by path
-     */
-    fun getFileInfo(filePath: String): FileSystemItem? {
-        return try {
-            val file = File(filePath)
-            if (file.exists() && file.canRead()) {
-                FileSystemItem(
-                    path = file.absolutePath,
-                    name = file.name,
-                    isDirectory = file.isDirectory,
-                    size = if (file.isFile) file.length() else 0,
-                    lastModified = file.lastModified(),
-                    canRead = file.canRead(),
-                    canWrite = file.canWrite()
-                )
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error getting file info for: $filePath", e)
-            null
-        }
-    }
-
-    /**
-     * Clean up resources
-     */
-    fun cleanup() {
-        Log.d(TAG, "FileSystemManager cleanup completed")
-    }
-} 
+}

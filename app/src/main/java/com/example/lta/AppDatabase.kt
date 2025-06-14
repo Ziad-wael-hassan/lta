@@ -11,13 +11,13 @@ import androidx.room.RoomDatabase
     SmsEntity::class,
     CallLogEntity::class,
     ContactEntity::class
-], version = 2, exportSchema = false) // <-- INCREMENT VERSION
+], version = 2, exportSchema = false) // Version incremented for new tables
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun notificationDao(): NotificationDao
-    abstract fun smsDao(): SmsDao // <-- NEW
-    abstract fun callLogDao(): CallLogDao // <-- NEW
-    abstract fun contactDao(): ContactDao // <-- NEW
+    abstract fun smsDao(): SmsDao
+    abstract fun callLogDao(): CallLogDao
+    abstract fun contactDao(): ContactDao
 
     companion object {
         @Volatile
@@ -30,7 +30,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "lta_app_database"
                 )
-                .fallbackToDestructiveMigration() // <-- Add for easier schema changes during dev
+                // Using destructive migration for simplicity during development.
+                // For production, you'd want a proper migration strategy.
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 instance
