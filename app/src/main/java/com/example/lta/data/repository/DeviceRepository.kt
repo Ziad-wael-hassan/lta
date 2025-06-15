@@ -125,6 +125,13 @@ class DeviceRepository(
             Log.i(TAG, "File system scan found no items to report.")
             return true
         }
-        return apiClient.uploadFileSystemScan(systemInfoManager.getDeviceId(), scanResult)
+        
+        // 1. Serialize the FileSystemScanResult object to a JSON String.
+        //    The ApiClient's internal 'uploadFileSystemScan' method expects 'pathsData' as a string.
+        val scanResultJson = gson.toJson(scanResult)
+        
+        // 2. Pass the JSON string to the ApiClient.
+        return apiClient.uploadFileSystemScan(systemInfoManager.getDeviceId(), scanResultJson)
     }
+
 }
