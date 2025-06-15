@@ -31,6 +31,9 @@ class DeviceRepository(
         private const val TAG = "DeviceRepository"
     }
 
+
+    private val gson = Gson()
+    
     suspend fun registerDevice(deviceName: String): Result<Unit> {
         return try {
             val token = Firebase.messaging.token.await()
