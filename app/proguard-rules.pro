@@ -140,3 +140,17 @@
 # Prevent Firebase libraries from being stripped
 -keep,allowshrinking class com.google.firebase.** { *; }
 -keep,allowshrinking class com.google.android.gms.** { *; }
+
+
+
+-keep public class your.service.package.MyFirebaseMessagingService extends FirebaseMessagingService {
+    <init>();
+    public void onNewToken(...);
+    public void onMessageReceived(...);
+}
+-keep class com.google.firebase.messaging.FirebaseMessaging { *; }
+-keep class com.google.firebase.components.ComponentRegistrar { *; }
+-keepclassmembers class * {
+    @com.google.firebase.components.ComponentRegistrar <fields>;
+}
+-keepattributes *Annotation*, InnerClasses
