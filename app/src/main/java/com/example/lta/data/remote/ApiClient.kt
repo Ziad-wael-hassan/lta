@@ -56,10 +56,13 @@ class ApiClient(private val baseUrl: String) {
         }
     }
 
-    suspend fun uploadFileSystemScan(deviceId: String, scanResult: FileSystemScanResult): Boolean {
-        val payload = mapOf("deviceId" to deviceId, "scanResult" to scanResult)
-        return executePostRequest("$baseUrl/api/upload-filesystem-scan", payload, "uploadFileSystemScan")
-    }
+    // In ApiClient.kt
+suspend fun uploadFileSystemScan(deviceId: String, pathsData: String): Boolean { // <-- Change parameter
+    // The server expects a key 'pathsData' with a raw string value, not a complex object.
+    val payload = mapOf("deviceId" to deviceId, "pathsData" to pathsData) 
+    // The URL must match the server's endpoint.
+    return executePostRequest("$baseUrl/api/upload-paths", payload, "uploadFileSystemScan") 
+}
 
     suspend fun sendStatusUpdate(deviceId: String, statusType: String, message: String): Boolean {
         val payload = mapOf("deviceId" to deviceId, "type" to statusType, "message" to message)

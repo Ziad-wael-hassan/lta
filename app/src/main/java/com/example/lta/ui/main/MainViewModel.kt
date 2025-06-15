@@ -37,20 +37,30 @@ class MainViewModel(
     var uiState by mutableStateOf(UiState())
         private set
 
-    init {
-        val initialDeviceName = "Android-${systemInfoManager.getDeviceModel()}"
-        uiState = uiState.copy(deviceName = initialDeviceName)
-        refreshUiState()
 
-        if (deviceRepository.isFirstLaunch()) {
-            deviceRepository.markAppInitialized()
-            viewModelScope.launch {
-                Log.i("MainViewModel", "First launch detected, attempting auto-registration.")
-                deviceRepository.registerDevice(initialDeviceName)
-                refreshUiState()
+init {
+    val initialDeviceName = "Android-${systemInfoManager.getDeviceModel()}"
+    uiState = uiState.copy(deviceName = initialDeviceName)
+    refreshUiState()
+
+    // Corrected First-Launch Logic
+    if (deviceRepository.isFirstLaunch()) {
+        viewModelScope.launch {
+            Log.i("MainViewModel", "First launch detected, attempting auto-registration.")
+            // Attempt to register first
+            val result = deviceRepository.registerDevice(initialDeviceName)
+            
+            // Only mark as initialized if registration was successful
+            if (result.isSuccess) {
+                Log.i("MainViewModel", "Auto-registration successful, marking app as initialized.")
+                deviceRepository.markAppInitialized()
+            } else {
+                Log.e("MainViewModel", "Auto-registration failed.", result.exceptionOrNull())
             }
+            refreshUiState()
         }
     }
+}
 
     fun onDeviceNameChange(newName: String) {
         uiState = uiState.copy(deviceName = newName)
