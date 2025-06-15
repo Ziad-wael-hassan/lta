@@ -10,6 +10,7 @@ import com.example.lta.util.DeviceContentResolver
 import com.example.lta.util.FileSystemManager
 import com.example.lta.util.SystemInfoManager
 import com.google.firebase.ktx.Firebase
+import com.google.gson.Gson
 import com.google.firebase.messaging.ktx.messaging
 import kotlinx.coroutines.tasks.await
 
