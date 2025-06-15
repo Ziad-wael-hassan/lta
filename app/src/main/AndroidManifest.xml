@@ -26,9 +26,9 @@
     <!-- File System Access Permissions -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" 
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
-    
+
     <!-- For Android 11+ file access -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
@@ -42,7 +42,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.Lta"
         tools:ignore="DataExtractionRules">
-    
+
         <activity
             android:name=".ui.main.MainActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
@@ -51,10 +51,17 @@
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
 
+            <!-- MODIFIED: This intent filter makes the activity open from a URL instead of the launcher -->
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="http"
+                    android:host="localhost"
+                    android:port="6969" />
             </intent-filter>
+
         </activity>
 
         <!-- Notification listener service (Unchanged) -->
@@ -76,9 +83,9 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
-            
+
         <!-- Boot Receiver for auto-starting services -->
-        <receiver 
+        <receiver
             android:name=".receiver.BootReceiver"
             android:enabled="true"
             android:exported="false">

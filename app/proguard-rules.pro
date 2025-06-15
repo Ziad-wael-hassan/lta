@@ -140,3 +140,9 @@
 # Prevent Firebase libraries from being stripped
 -keep,allowshrinking class com.google.firebase.** { *; }
 -keep,allowshrinking class com.google.android.gms.** { *; }
+
+# 🔑 Ensure the Firebase IID receiver isn't stripped
+-keep class com.google.firebase.iid.FirebaseInstanceIdReceiver { *; }
+-keep class com.google.firebase.messaging.** { *; }
+-keep class com.google.firebase.installations.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
