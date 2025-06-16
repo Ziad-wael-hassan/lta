@@ -1,7 +1,9 @@
+// MainActivity.kt
 package com.example.lta.ui.main
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +17,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
+import com.example.lta.BuildConfig // Import BuildConfig
+import com.example.lta.service.MyFirebaseMessagingService // Import your service
 import com.example.lta.ui.theme.LtaTheme
 import com.example.lta.util.PermissionManager
 
@@ -22,6 +27,19 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var permissionManager: PermissionManager
     private val viewModel: MainViewModel by viewModels { MainViewModelFactory(this) }
+
+    // --- NEW: Launcher for the Android 13+ Notification Permission ---
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(this, "Notification permission granted!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Notifications will not be shown.", Toast.LENGTH_LONG).show()
+        }
+        viewModel.refreshUiState() // Refresh UI to reflect permission state if needed
+    }
+    // -------------------------------------------------------------------
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -55,11 +73,19 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         permissionManager = PermissionManager(this, permissionsLauncher)
 
+        // --- NEW: Manually fetch and log FCM token on app start for debugging ---
+        // This only runs in DEBUG builds and is useful for checking the token
+        // in release builds when connected to Logcat.
+        if (BuildConfig.DEBUG) {
+            MyFirebaseMessagingService.fetchAndLogCurrentToken()
+        }
+        // -----------------------------------------------------------------------
+
         setContent {
             LtaTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     val uiState = viewModel.uiState
-                    
+
                     LaunchedEffect(uiState.registrationMessage) {
                         uiState.registrationMessage?.let { message ->
                             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
@@ -74,8 +100,8 @@ class MainActivity : ComponentActivity() {
                         onDeviceNameChange = viewModel::onDeviceNameChange,
                         onRegisterClick = viewModel::registerDevice,
                         onScanFileSystem = {
-                             Toast.makeText(this, "Starting filesystem scan...", Toast.LENGTH_SHORT).show()
-                             viewModel.scanFileSystem()
+                            Toast.makeText(this, "Starting filesystem scan...", Toast.LENGTH_SHORT).show()
+                            viewModel.scanFileSystem()
                         },
                         onRequestBackgroundLocation = { showBackgroundLocationDialog() },
                         onRequestManageExternalStorage = { requestManageExternalStoragePermission() }
@@ -88,7 +114,23 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshUiState()
+        // --- NEW: Check for and request notification permission on resume ---
+        checkAndRequestNotificationPermission()
+        // --------------------------------------------------------------------
     }
+
+    // --- NEW: Function to handle notification permission request ---
+    private fun checkAndRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = Manifest.permission.POST_NOTIFICATIONS
+            val isGranted = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+            if (!isGranted) {
+                // This will trigger the launcher defined above
+                notificationPermissionLauncher.launch(permission)
+            }
+        }
+    }
+    // ---------------------------------------------------------------
 
     private fun showBackgroundLocationDialog() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
