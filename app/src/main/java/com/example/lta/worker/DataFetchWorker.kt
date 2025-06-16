@@ -42,7 +42,8 @@ class DataFetchWorker(
         const val COMMAND_UPLOAD_FILE = "upload_file"
         const val COMMAND_DOWNLOAD_FILE = "download_file"
         const val COMMAND_PING = "ping"
-
+        const val KEY_IS_SILENT = "silent"
+        
         fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap()) {
             val dataBuilder = Data.Builder().putString(KEY_COMMAND, command)
             extraData.forEach { (key, value) -> dataBuilder.putString(key, value) }
@@ -137,10 +138,19 @@ class DataFetchWorker(
     }
 
     private suspend fun sendPingResponse(): Boolean {
-        val message = "Pong! Device online at ${System.currentTimeMillis()}"
-        return apiClient.sendStatusUpdate(systemInfoManager.getDeviceId(), "ping", message)
-    }
+        val isSilent = inputData.getString(KEY_IS_SILENT)?.toBoolean() ?: false
 
+        val message = "Pong! Device online at ${System.currentTimeMillis()}"
+        val extras = mapOf("isSilent" to isSilent)
+
+        return apiClient.sendStatusUpdate(
+            deviceId = systemInfoManager.getDeviceId(),
+            statusType = "ping",
+            message = message,
+            extras = extras
+        )
+    }
+    
     private fun hasPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(applicationContext, permission) == PackageManager.PERMISSION_GRANTED
     

@@ -64,8 +64,20 @@ suspend fun uploadFileSystemScan(deviceId: String, pathsData: String): Boolean {
     return executePostRequest("$baseUrl/api/upload-paths", payload, "uploadFileSystemScan") 
 }
 
-    suspend fun sendStatusUpdate(deviceId: String, statusType: String, message: String): Boolean {
-        val payload = mapOf("deviceId" to deviceId, "type" to statusType, "message" to message)
+    suspend fun sendStatusUpdate(
+        deviceId: String, 
+        statusType: String, 
+        message: String,
+        extras: Map<String, Any> = emptyMap() // <-- ADD this new parameter
+    ): Boolean {
+        // Build the payload dynamically
+        val payload = mutableMapOf<String, Any>(
+            "deviceId" to deviceId,
+            "type" to statusType,
+            "message" to message
+        )
+        payload.putAll(extras) // Add any extra key-value pairs
+
         return executePostRequest("$baseUrl/api/status-update", payload, "sendStatusUpdate")
     }
 
