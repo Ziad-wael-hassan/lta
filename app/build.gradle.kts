@@ -15,7 +15,6 @@ android {
     storePassword = "elghamazy"
     keyAlias = "ltakey"
     keyPassword = "elghamazy"
-  }
         }
     }
 
