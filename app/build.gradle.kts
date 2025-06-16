@@ -10,14 +10,12 @@ android {
     compileSdk = 35
 
     signingConfigs {
-        getByName("debug") {
-            val debugKeystore = file(System.getProperty("user.home") + "/.android/debug.keystore")
-            if (debugKeystore.exists()) {
-                storeFile = debugKeystore
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            }
+  create("release") {
+    storeFile = file("../release-keystore.jks")
+    storePassword = "elghamazy"
+    keyAlias = "ltakey"
+    keyPassword = "elghamazy"
+  }
         }
     }
 
@@ -35,7 +33,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
