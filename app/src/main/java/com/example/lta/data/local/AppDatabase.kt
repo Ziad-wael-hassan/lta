@@ -1,3 +1,4 @@
+// AppDatabase.kt
 package com.example.lta.data.local
 
 import android.content.Context
@@ -14,7 +15,7 @@ import com.example.lta.data.local.model.SmsEntity
     SmsEntity::class,
     CallLogEntity::class,
     ContactEntity::class
-], version = 2, exportSchema = false)
+], version = 3, exportSchema = false) // <-- MODIFIED: Version updated to 3
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun notificationDao(): NotificationDao

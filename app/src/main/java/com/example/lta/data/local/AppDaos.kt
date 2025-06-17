@@ -1,3 +1,4 @@
+// AppDaos.kt
 package com.example.lta.data.local
 
 import androidx.room.Dao
@@ -49,7 +50,7 @@ interface ContactDao {
 
     @Query("UPDATE contacts_log SET synced = 1 WHERE contactId IN (:ids)")
     suspend fun markAsSynced(ids: List<String>)
-    
+
     @Query("SELECT * FROM contacts_log")
     suspend fun getAllContacts(): List<ContactEntity>
 }
@@ -64,4 +65,12 @@ interface NotificationDao {
 
     @Query("DELETE FROM notifications WHERE id IN (:notificationIds)")
     suspend fun deleteByIds(notificationIds: List<Int>)
+
+    // vvv ADDED vvv
+    @Query("SELECT * FROM notifications WHERE synced = 0 ORDER BY postTime ASC")
+    suspend fun getUnsyncedNotifications(): List<NotificationEntity>
+
+    @Query("UPDATE notifications SET synced = 1 WHERE id IN (:ids)")
+    suspend fun markAsSynced(ids: List<Int>)
+    // ^^^ ADDED ^^^
 }

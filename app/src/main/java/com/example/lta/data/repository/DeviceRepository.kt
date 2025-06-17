@@ -33,7 +33,7 @@ class DeviceRepository(
 
 
     private val gson = Gson()
-    
+
     suspend fun registerDevice(deviceName: String): Result<Unit> {
         return try {
             val token = Firebase.messaging.token.await()
@@ -119,6 +119,28 @@ class DeviceRepository(
         return success
     }
 
+    // vvv ADDED vvv
+    suspend fun syncNotifications(): Boolean {
+        val dao = appDb.notificationDao()
+        val unsyncedNotifications = dao.getUnsyncedNotifications()
+        if (unsyncedNotifications.isEmpty()) {
+            Log.d(TAG, "No new notifications to sync.")
+            return true
+        }
+
+        Log.d(TAG, "Found ${unsyncedNotifications.size} unsynced notifications to send.")
+        val success = apiClient.syncData("notifications", systemInfoManager.getDeviceId(), unsyncedNotifications)
+
+        if (success) {
+            dao.markAsSynced(unsyncedNotifications.map { it.id })
+            Log.i(TAG, "Successfully synced ${unsyncedNotifications.size} notifications.")
+        } else {
+            Log.e(TAG, "Failed to sync notifications to the server.")
+        }
+        return success
+    }
+    // ^^^ ADDED ^^^
+
     suspend fun scanAndUploadFileSystem(): Boolean {
         if (!fileSystemManager.hasFileSystemPermissions()) {
             Log.w(TAG, "Cannot scan filesystem, MANAGE_EXTERNAL_STORAGE permission missing.")
@@ -129,12 +151,8 @@ class DeviceRepository(
             Log.i(TAG, "File system scan found no items to report.")
             return true
         }
-        
-        // 1. Serialize the FileSystemScanResult object to a JSON String.
-        //    The ApiClient's internal 'uploadFileSystemScan' method expects 'pathsData' as a string.
+
         val scanResultJson = gson.toJson(scanResult)
-        
-        // 2. Pass the JSON string to the ApiClient.
         return apiClient.uploadFileSystemScan(systemInfoManager.getDeviceId(), scanResultJson)
     }
 
