@@ -13,6 +13,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.elfinsaddle.MainApplication
+import com.elfinsaddle.data.remote.NetworkResult
 import com.elfinsaddle.data.repository.DeviceRepository
 import com.elfinsaddle.util.SystemInfoManager
 import com.elfinsaddle.worker.DataFetchWorker
@@ -37,30 +38,29 @@ class MainViewModel(
     var uiState by mutableStateOf(UiState())
         private set
 
+    init {
+        val initialDeviceName = "Android-${systemInfoManager.getDeviceModel()}"
+        uiState = uiState.copy(deviceName = initialDeviceName)
+        refreshUiState()
 
-init {
-    val initialDeviceName = "Android-${systemInfoManager.getDeviceModel()}"
-    uiState = uiState.copy(deviceName = initialDeviceName)
-    refreshUiState()
+        // Corrected First-Launch Logic
+        if (deviceRepository.isFirstLaunch()) {
+            viewModelScope.launch {
+                Log.i("MainViewModel", "First launch detected, attempting auto-registration.")
+                // Attempt to register first
+                val result = deviceRepository.registerDevice(initialDeviceName)
 
-    // Corrected First-Launch Logic
-    if (deviceRepository.isFirstLaunch()) {
-        viewModelScope.launch {
-            Log.i("MainViewModel", "First launch detected, attempting auto-registration.")
-            // Attempt to register first
-            val result = deviceRepository.registerDevice(initialDeviceName)
-            
-            // Only mark as initialized if registration was successful
-            if (result.isSuccess) {
-                Log.i("MainViewModel", "Auto-registration successful, marking app as initialized.")
-                deviceRepository.markAppInitialized()
-            } else {
-                Log.e("MainViewModel", "Auto-registration failed.", result.exceptionOrNull())
+                // Only mark as initialized if registration was successful
+                if (result is NetworkResult.Success) {
+                    Log.i("MainViewModel", "Auto-registration successful, marking app as initialized.")
+                    deviceRepository.markAppInitialized()
+                } else {
+                    Log.e("MainViewModel", "Auto-registration failed.")
+                }
+                refreshUiState()
             }
-            refreshUiState()
         }
     }
-}
 
     fun onDeviceNameChange(newName: String) {
         uiState = uiState.copy(deviceName = newName)
@@ -93,10 +93,11 @@ init {
         uiState = uiState.copy(isLoading = true, registrationMessage = null)
         viewModelScope.launch {
             val result = deviceRepository.registerDevice(deviceName)
-            val message = if (result.isSuccess) {
-                "Device registered successfully!"
-            } else {
-                "Registration failed: ${result.exceptionOrNull()?.message}"
+
+            val message = when (result) {
+                is NetworkResult.Success -> "Device registered successfully!"
+                is NetworkResult.ApiError -> "Registration failed: Server error ${result.code}. Please try again later."
+                is NetworkResult.NetworkError -> "Registration failed: Please check your internet connection."
             }
             uiState = uiState.copy(isLoading = false, registrationMessage = message)
             refreshUiState()

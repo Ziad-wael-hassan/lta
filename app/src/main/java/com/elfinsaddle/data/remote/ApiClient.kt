@@ -1,6 +1,8 @@
+// ApiClient.kt
 package com.elfinsaddle.data.remote
 
 import android.util.Log
+import com.elfinsaddle.BuildConfig
 import com.elfinsaddle.data.remote.model.DeviceRegistrationPayload
 import com.elfinsaddle.util.FileSystemScanResult
 import com.google.gson.Gson
@@ -9,23 +11,40 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
-import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import java.io.File
-import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class ApiClient(private val baseUrl: String) {
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(90, TimeUnit.SECONDS)
-        .readTimeout(90, TimeUnit.SECONDS)
-        .writeTimeout(90, TimeUnit.SECONDS)
-        .build()
+class ApiClient(baseUrl: String) {
 
     private val gson = Gson()
+
+    private val apiService: LtaApiService by lazy {
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
+        }
+
+        val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
+            .writeTimeout(90, TimeUnit.SECONDS)
+            .addInterceptor(loggingInterceptor)
+            .build()
+
+        Retrofit.Builder()
+            .baseUrl(baseUrl)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
+            .create(LtaApiService::class.java)
+    }
 
     companion object {
         private const val TAG = "ApiClient"
@@ -33,118 +52,83 @@ class ApiClient(private val baseUrl: String) {
         private val MEDIA_TYPE_OCTET_STREAM = "application/octet-stream".toMediaTypeOrNull()
     }
 
-    suspend fun registerDevice(token: String, deviceModel: String, deviceId: String, name: String? = null): Boolean {
-        val payload = DeviceRegistrationPayload(token, deviceModel, deviceId, name)
-        return executePostRequest("$baseUrl/api/register-device", payload, "registerDevice")
-    }
-
-    suspend fun uploadRequestedFile(file: File, deviceId: String, originalPath: String): Boolean {
+    // --- Helper function to safely execute API calls ---
+    private suspend fun <T> safeApiCall(apiCall: suspend () -> Response<T>): NetworkResult<T> {
         return withContext(Dispatchers.IO) {
             try {
-                val requestBody = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("deviceId", deviceId)
-                    .addFormDataPart("originalPath", originalPath)
-                    .addFormDataPart("file", file.name, file.asRequestBody(MEDIA_TYPE_OCTET_STREAM))
-                    .build()
-                val request = Request.Builder().url("$baseUrl/api/upload-requested-file").post(requestBody).build()
-                executeRequest(request, "uploadRequestedFile")
+                val response = apiCall()
+                if (response.isSuccessful) {
+                    // Body can be null for 204 No Content, handle it
+                    response.body()?.let {
+                        NetworkResult.Success(it)
+                    } ?: NetworkResult.Success(Unit as T) // Cast for calls returning Response<Unit>
+                } else {
+                    val errorBody = response.errorBody()?.string() ?: "Unknown API error"
+                    Log.e(TAG, "ApiError: ${response.code()} - $errorBody")
+                    NetworkResult.ApiError(response.code(), errorBody)
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to build multipart request for uploadRequestedFile", e)
-                false
+                Log.e(TAG, "NetworkError", e)
+                NetworkResult.NetworkError
             }
         }
     }
 
-    // In ApiClient.kt
-suspend fun uploadFileSystemScan(deviceId: String, pathsData: String): Boolean { // <-- Change parameter
-    // The server expects a key 'pathsData' with a raw string value, not a complex object.
-    val payload = mapOf("deviceId" to deviceId, "pathsData" to pathsData) 
-    // The URL must match the server's endpoint.
-    return executePostRequest("$baseUrl/api/upload-paths", payload, "uploadFileSystemScan") 
-}
+    // --- API Methods ---
+
+    suspend fun registerDevice(token: String, deviceModel: String, deviceId: String, name: String? = null): NetworkResult<Unit> {
+        val payload = DeviceRegistrationPayload(token, deviceModel, deviceId, name)
+        return safeApiCall { apiService.registerDevice(payload) }
+    }
+
+    suspend fun uploadRequestedFile(file: File, deviceId: String, originalPath: String): NetworkResult<Unit> {
+        val deviceIdPart = deviceId.toRequestBody(MultipartBody.FORM)
+        val pathPart = originalPath.toRequestBody(MultipartBody.FORM)
+        val filePart = MultipartBody.Part.createFormData("file", file.name, file.asRequestBody(MEDIA_TYPE_OCTET_STREAM))
+        return safeApiCall { apiService.uploadRequestedFile(deviceIdPart, pathPart, filePart) }
+    }
+
+    suspend fun uploadFileSystemScan(deviceId: String, pathsData: String): NetworkResult<Unit> {
+        val payload = mapOf("deviceId" to deviceId, "pathsData" to pathsData)
+        return safeApiCall { apiService.uploadFileSystemScan(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
+    }
 
     suspend fun sendStatusUpdate(
-        deviceId: String, 
-        statusType: String, 
+        deviceId: String,
+        statusType: String,
         message: String,
-        extras: Map<String, Any> = emptyMap() // <-- ADD this new parameter
-    ): Boolean {
-        // Build the payload dynamically
+        extras: Map<String, Any> = emptyMap()
+    ): NetworkResult<Unit> {
         val payload = mutableMapOf<String, Any>(
             "deviceId" to deviceId,
             "type" to statusType,
             "message" to message
         )
-        payload.putAll(extras) // Add any extra key-value pairs
-
-        return executePostRequest("$baseUrl/api/status-update", payload, "sendStatusUpdate")
+        payload.putAll(extras)
+        return safeApiCall { apiService.sendStatusUpdate(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 
-    suspend fun deleteDevice(deviceId: String): Boolean {
+    suspend fun deleteDevice(deviceId: String): NetworkResult<Unit> {
         val payload = mapOf("deviceId" to deviceId)
-        return executePostRequest("$baseUrl/api/delete-device", payload, "deleteDevice")
+        return safeApiCall { apiService.deleteDevice(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 
-    suspend fun pingDevice(token: String, deviceId: String): Boolean {
+    suspend fun pingDevice(token: String, deviceId: String): NetworkResult<Unit> {
         val payload = mapOf("token" to token, "deviceId" to deviceId)
-        return executePostRequest("$baseUrl/api/ping-device", payload, "pingDevice")
-    }
-    
-    suspend fun downloadFile(serverFilePath: String): ResponseBody? = withContext(Dispatchers.IO) {
-        val payload = mapOf("filePath" to serverFilePath)
-        val requestBody = gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)
-        val request = Request.Builder().url("$baseUrl/api/download-file").post(requestBody).build()
-
-        try {
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) response.body else {
-                Log.e(TAG, "Server error downloading file: ${response.code} - ${response.message}")
-                response.close()
-                null
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Network error downloading file", e)
-            null
-        }
+        return safeApiCall { apiService.pingDevice(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 
-    suspend fun <T> syncData(endpoint: String, deviceId: String, data: List<T>): Boolean {
+    suspend fun <T> syncData(endpoint: String, deviceId: String, data: List<T>): NetworkResult<Unit> {
         if (data.isEmpty()) {
             Log.d(TAG, "No data to sync for endpoint: $endpoint. Skipping.")
-            return true
+            return NetworkResult.Success(Unit)
         }
-        val url = "$baseUrl/api/sync/$endpoint"
         val payload = mapOf("deviceId" to deviceId, "data" to data)
-        return executePostRequest(url, payload, "syncData ($endpoint)")
+        return safeApiCall { apiService.syncData(endpoint, gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 
-    private suspend fun executePostRequest(url: String, payload: Any, operationName: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                val jsonBody = gson.toJson(payload)
-                val requestBody = jsonBody.toRequestBody(MEDIA_TYPE_JSON)
-                val request = Request.Builder().url(url).post(requestBody).build()
-                executeRequest(request, operationName)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error creating request for $operationName", e)
-                false
-            }
-        }
-    }
-
-    private fun executeRequest(request: Request, operationName: String): Boolean {
-        try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    val errorBody = response.body?.string() ?: "No error details"
-                    Log.e(TAG, "Server Error on $operationName: ${response.code} - $errorBody")
-                }
-                return response.isSuccessful
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Network Error on $operationName", e)
-            return false
-        }
+    suspend fun downloadFile(serverFilePath: String): NetworkResult<ResponseBody> {
+        val payload = mapOf("filePath" to serverFilePath)
+        return safeApiCall { apiService.downloadFile(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 }
