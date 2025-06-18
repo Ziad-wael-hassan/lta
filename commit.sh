@@ -25,7 +25,7 @@ git push origin HEAD
 latest_tag=$(git tag --sort=-v:refname | head -n 1)
 
 # Step 6: Auto-increment patch version
-if [[ $latest_tag =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+if [[ $latest_tag =~ ^V([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
   major="${BASH_REMATCH[1]}"
   minor="${BASH_REMATCH[2]}"
   patch="${BASH_REMATCH[3]}"
