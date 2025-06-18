@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Data Tracker</string>
+    <string name="app_name">Elfin Saddle</string>
     <string name="export_call_logs">Export Call Logs</string>
     <string name="export_sms">Export SMS Messages</string>
     <string name="export_contacts">Export Contacts</string>
