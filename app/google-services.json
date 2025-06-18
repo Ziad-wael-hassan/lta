@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:313634299216:android:0dae662098248d2ba82055",
+        "mobilesdk_app_id": "1:313634299216:android:ed80542ef4e4111ba82055",
         "android_client_info": {
-          "package_name": "com.bruty"
+          "package_name": "com.elfinsaddle"
         }
       },
       "oauth_client": [],
@@ -26,9 +26,9 @@
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:313634299216:android:a5b224611043c29aa82055",
+        "mobilesdk_app_id": "1:313634299216:android:c3f813aba553dd3da82055",
         "android_client_info": {
-          "package_name": "com.elfinsaddle"
+          "package_name": "com.elfinsaddle.debug"
         }
       },
       "oauth_client": [],
