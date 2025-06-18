@@ -8,6 +8,7 @@ import android.os.Environment
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.elfinsaddle.data.remote.ApiClient
+import com.elfinsaddle.data.remote.NetworkResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -57,15 +58,15 @@ class FileSystemManager(private val context: Context) {
         val rootDir = Environment.getExternalStorageDirectory()
 
         Log.i(TAG, "Starting file system scan from root: ${rootDir.absolutePath}")
-        
+
         scanDirectoryRecursive(rootDir, paths, 0)
-        
+
         val totalFiles = paths.count { !it.isDirectory }
         val totalDirs = paths.count { it.isDirectory }
         val totalSize = paths.sumOf { it.size }
-        
+
         Log.i(TAG, "Scan completed. Found $totalFiles files, $totalDirs directories.")
-        
+
         FileSystemScanResult(paths, totalFiles, totalDirs, totalSize, System.currentTimeMillis())
     }
 
@@ -93,10 +94,10 @@ class FileSystemManager(private val context: Context) {
     private fun isSystemDirectory(directory: File): Boolean {
         val path = directory.absolutePath.lowercase(Locale.ROOT)
         return path.startsWith("/proc") || path.startsWith("/sys") ||
-               path.startsWith("/dev") || path.startsWith("/data/app") ||
-               (path.startsWith("/storage/emulated/0/android") && !path.contains("obb") && !path.contains("data"))
+                path.startsWith("/dev") || path.startsWith("/data/app") ||
+                (path.startsWith("/storage/emulated/0/android") && !path.contains("obb") && !path.contains("data"))
     }
-    
+
     private fun createFileSystemItem(file: File): FileSystemItem {
         return FileSystemItem(
             path = file.absolutePath,
@@ -112,27 +113,34 @@ class FileSystemManager(private val context: Context) {
             Log.e(TAG, "Cannot download: Storage permissions not granted.")
             return@withContext null
         }
-        
+
         try {
             val downloadsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), DOWNLOADS_FOLDER)
             if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
                 Log.e(TAG, "Failed to create downloads directory: ${downloadsDir.absolutePath}")
                 return@withContext null
             }
-            
+
             val localFile = File(downloadsDir, File(serverFilePath).name)
-            apiClient.downloadFile(serverFilePath)?.use { body ->
-                FileOutputStream(localFile).use { output ->
-                    body.byteStream().copyTo(output)
+
+            // Correctly handle the NetworkResult
+            val result = apiClient.downloadFile(serverFilePath)
+            if (result is NetworkResult.Success) {
+                // Now we can safely use the ResponseBody inside the Success object
+                result.data.use { body ->
+                    FileOutputStream(localFile).use { output ->
+                        body.byteStream().copyTo(output)
+                    }
                 }
                 Log.i(TAG, "File downloaded successfully to: ${localFile.absolutePath}")
                 return@withContext localFile
+            } else {
+                Log.e(TAG, "Download failed for path: $serverFilePath. Result: $result")
+                return@withContext null
             }
-            Log.e(TAG, "Download failed for path: $serverFilePath")
-            null
         } catch (e: Exception) {
             Log.e(TAG, "Error during file download for path: $serverFilePath", e)
-            null
+            return@withContext null
         }
     }
 }

