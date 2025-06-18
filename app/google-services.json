@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:313634299216:android:a5b224611043c29aa82055",
         "android_client_info": {
-          "package_name": "com.example.lta"
+          "package_name": "com.elfinsaddle"
         }
       },
       "oauth_client": [],
@@ -28,7 +28,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:313634299216:android:66b5209681a2bb9fa82055",
         "android_client_info": {
-          "package_name": "com.example.lta.debug"
+          "package_name": "com.elfinsaddle.debug"
         }
       },
       "oauth_client": [],

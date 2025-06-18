@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.lta"
+    namespace = "com.elfinsaddle"
     compileSdk = 35
 
     signingConfigs {
@@ -19,7 +19,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.lta"
+        applicationId = "com.elfinsaddle"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

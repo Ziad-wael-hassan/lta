@@ -74,11 +74,11 @@
 }
 
 -keep class androidx.work.** { *; }
--keep class com.example.lta.DataFetchWorker { *; }
--keep class com.example.lta.TokenCheckWorker { *; }
+-keep class com.elfinsaddle.DataFetchWorker { *; }
+-keep class com.elfinsaddle.TokenCheckWorker { *; }
 
--keep class com.example.lta.MainApplication { *; }
--keep class com.example.lta.BootReceiver { *; }
+-keep class com.elfinsaddle.MainApplication { *; }
+-keep class com.elfinsaddle.BootReceiver { *; }
 
 -keep class com.google.firebase.ktx.** { *; }
 -dontwarn com.google.firebase.ktx.**
@@ -93,17 +93,17 @@
 # APP-SPECIFIC RULES
 # ===============================
 
--keep class com.example.lta.ApiClient { *; }
--keep class com.example.lta.SystemInfoManager { *; }
--keep class com.example.lta.AppPreferences { *; }
--keep class com.example.lta.DeviceRegistrationPayload { *; }
+-keep class com.elfinsaddle.ApiClient { *; }
+-keep class com.elfinsaddle.SystemInfoManager { *; }
+-keep class com.elfinsaddle.AppPreferences { *; }
+-keep class com.elfinsaddle.DeviceRegistrationPayload { *; }
 
--keep class com.example.lta.** {
+-keep class com.elfinsaddle.** {
     public <methods>;
     public <fields>;
 }
 
--keep class com.example.lta.MyFirebaseMessagingService { *; }
+-keep class com.elfinsaddle.MyFirebaseMessagingService { *; }
 
 -keep class * extends android.app.Service
 -keep class * extends android.content.BroadcastReceiver
