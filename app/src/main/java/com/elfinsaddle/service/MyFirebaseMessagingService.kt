@@ -1,8 +1,11 @@
 // MyFirebaseMessagingService.kt
 package com.elfinsaddle.service
 
-import android.content.Context
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.elfinsaddle.BuildConfig
 import com.elfinsaddle.MainApplication
 import com.elfinsaddle.data.repository.DeviceRepository
@@ -15,27 +18,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "MyFirebaseMsgService"
         private const val COMMAND_KEY = "command"
+        private const val COMMAND_RECORD_MIC = "record_mic"
 
-        /**
-         * A helper function to manually fetch and log the current FCM token.
-         * This is extremely useful for debugging release builds.
-         * Call this from your MainActivity's onCreate or a debug menu button.
-         */
         fun fetchAndLogCurrentToken() {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                 if (!task.isSuccessful) {
                     Log.w(TAG, "MANUAL FETCH: Fetching FCM registration token failed", task.exception)
                     return@addOnCompleteListener
                 }
-
-                // Get new FCM registration token
                 val token = task.result
                 Log.d(TAG, "MANUAL FETCH: Current FCM Token is: $token")
             }
@@ -50,7 +46,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val buildType = if (BuildConfig.DEBUG) "DEBUG" else "RELEASE"
         Log.d(TAG, "FirebaseMessagingService created - Build Type: $buildType")
 
-        // Defensive initialization check
         if (applicationContext is MainApplication) {
             deviceRepository = (applicationContext as MainApplication).container.deviceRepository
             Log.d(TAG, "DeviceRepository successfully initialized.")
@@ -62,14 +57,11 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         Log.i(TAG, "A new FCM token was generated.")
-
-        // In debug builds, log the full token. In release, just a snippet.
         if (BuildConfig.DEBUG) {
             Log.d(TAG, "New FCM Token (DEBUG): $token")
         } else {
             Log.d(TAG, "New FCM Token (RELEASE): ${token.take(15)}...")
         }
-
         sendTokenToServer(token)
     }
 
@@ -82,20 +74,21 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                     Log.i(TAG, "Successfully updated FCM token on the backend.")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to update FCM token on backend.", e)
-                    // You might want to add retry logic here using WorkManager
                 }
             }
         } else {
-            Log.e(TAG, "Repository not initialized, cannot update token. The token will be lost if the app closes.")
+            Log.e(TAG, "Repository not initialized, cannot update token.")
         }
     }
 
+    private fun hasRecordAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
         Log.d(TAG, "FCM Message From: ${remoteMessage.from}")
 
-        // In debug builds, dump all data for easy inspection
         if (BuildConfig.DEBUG && remoteMessage.data.isNotEmpty()) {
             Log.d(TAG, "Message data payload: " + remoteMessage.data)
         }
@@ -104,6 +97,19 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         if (command.isNullOrBlank()) {
             Log.w(TAG, "Received FCM message without a '$COMMAND_KEY' key.")
             return
+        }
+
+        // Handle new command: record microphone
+        if (command == COMMAND_RECORD_MIC) {
+            Log.d(TAG, "Handling record microphone command.")
+            if (hasRecordAudioPermission()) {
+                val serviceIntent = Intent(this, AudioRecordingService::class.java)
+                ContextCompat.startForegroundService(this, serviceIntent)
+            } else {
+                Log.w(TAG, "Cannot start recording, RECORD_AUDIO permission not granted.")
+                // Optionally, notify the server that the command failed due to permissions.
+            }
+            return // Command handled, exit early
         }
 
         Log.d(TAG, "Received command: '$command'. Scheduling worker.")

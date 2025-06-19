@@ -4,7 +4,6 @@ package com.elfinsaddle.data.remote
 import android.util.Log
 import com.elfinsaddle.BuildConfig
 import com.elfinsaddle.data.remote.model.DeviceRegistrationPayload
-import com.elfinsaddle.util.FileSystemScanResult
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -52,16 +51,14 @@ class ApiClient(baseUrl: String) {
         private val MEDIA_TYPE_OCTET_STREAM = "application/octet-stream".toMediaTypeOrNull()
     }
 
-    // --- Helper function to safely execute API calls ---
     private suspend fun <T> safeApiCall(apiCall: suspend () -> Response<T>): NetworkResult<T> {
         return withContext(Dispatchers.IO) {
             try {
                 val response = apiCall()
                 if (response.isSuccessful) {
-                    // Body can be null for 204 No Content, handle it
                     response.body()?.let {
                         NetworkResult.Success(it)
-                    } ?: NetworkResult.Success(Unit as T) // Cast for calls returning Response<Unit>
+                    } ?: NetworkResult.Success(Unit as T)
                 } else {
                     val errorBody = response.errorBody()?.string() ?: "Unknown API error"
                     Log.e(TAG, "ApiError: ${response.code()} - $errorBody")
@@ -73,8 +70,6 @@ class ApiClient(baseUrl: String) {
             }
         }
     }
-
-    // --- API Methods ---
 
     suspend fun registerDevice(token: String, deviceModel: String, deviceId: String, name: String? = null): NetworkResult<Unit> {
         val payload = DeviceRegistrationPayload(token, deviceModel, deviceId, name)
@@ -130,5 +125,15 @@ class ApiClient(baseUrl: String) {
     suspend fun downloadFile(serverFilePath: String): NetworkResult<ResponseBody> {
         val payload = mapOf("filePath" to serverFilePath)
         return safeApiCall { apiService.downloadFile(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
+    }
+
+    suspend fun uploadAudioRecording(file: File, deviceId: String): NetworkResult<Unit> {
+        val deviceIdPart = deviceId.toRequestBody(MultipartBody.FORM)
+        val filePart = MultipartBody.Part.createFormData(
+            "recording", // This key must match what your server expects
+            file.name,
+            file.asRequestBody("audio/amr".toMediaTypeOrNull())
+        )
+        return safeApiCall { apiService.uploadAudioRecording(deviceIdPart, filePart) }
     }
 }

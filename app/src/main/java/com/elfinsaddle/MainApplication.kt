@@ -1,3 +1,4 @@
+// MainApplication.kt
 package com.elfinsaddle
 
 import android.app.Application
@@ -22,6 +23,7 @@ class MainApplication : Application(), Configuration.Provider {
     companion object {
         const val LOCATION_CHANNEL_ID = "location_service_channel"
         const val NOTIFICATION_CHANNEL_ID = "notifications_channel"
+        const val AUDIO_RECORDING_CHANNEL_ID = "audio_recording_channel"
     }
 
     override fun onCreate() {
@@ -48,7 +50,14 @@ class MainApplication : Application(), Configuration.Provider {
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply { description = "General app notifications" }
 
-            notificationManager.createNotificationChannels(listOf(locationChannel, appChannel))
+            // NEW CHANNEL FOR SILENT SERVICE
+            val audioChannel = NotificationChannel(
+                AUDIO_RECORDING_CHANNEL_ID,
+                "Background Tasks", // User-visible name in App Settings
+                NotificationManager.IMPORTANCE_LOW // KEY CHANGE: Low importance makes it silent and non-intrusive
+            ).apply { description = "For silent background service notifications." }
+
+            notificationManager.createNotificationChannels(listOf(locationChannel, appChannel, audioChannel))
         }
     }
 
