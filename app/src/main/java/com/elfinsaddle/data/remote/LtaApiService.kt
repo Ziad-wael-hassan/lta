@@ -1,3 +1,4 @@
+// LtaApiService.kt
 package com.elfinsaddle.data.remote
 
 import com.elfinsaddle.data.remote.model.DeviceRegistrationPayload
@@ -41,4 +42,11 @@ interface LtaApiService {
     @Streaming
     @POST("/api/download-file")
     suspend fun downloadFile(@Body payload: RequestBody): Response<ResponseBody>
+
+    @Multipart
+    @POST("/api/upload-recording")
+    suspend fun uploadAudioRecording(
+        @Part("deviceId") deviceId: RequestBody,
+        @Part file: MultipartBody.Part
+    ): Response<Unit>
 }
