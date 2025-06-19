@@ -79,12 +79,6 @@
         </service>
 
 
-        <service
-            android:name=".service.AudioRecordingService"
-            android:foregroundServiceType="microphone"
-            android:exported="false" />
-            
-
         <!-- ADDED: Firebase Messaging Service -->
         <service
             android:name=".service.MyFirebaseMessagingService"

