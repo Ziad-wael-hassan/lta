@@ -88,6 +88,12 @@
             </intent-filter>
         </service>
 
+
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="microphone"
+            tools:node="merge" />
+
         <!-- Boot Receiver for auto-starting services -->
         <receiver
             android:name=".receiver.BootReceiver"

