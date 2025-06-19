@@ -22,8 +22,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     companion object {
         private const val TAG = "MyFirebaseMsgService"
         private const val COMMAND_KEY = "command"
-        // Command name is now more specific to match the worker
-        private const val COMMAND_RECORD_MIC = "record_audio"
+        // ▼▼▼ THIS IS THE FIX ▼▼▼
+        // This constant must match the command string your server sends in the FCM payload.
+        private const val COMMAND_RECORD_MIC_FCM = "record_mic"
 
         fun fetchAndLogCurrentToken() {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -98,11 +99,12 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // Handle new command: record microphone
-        if (command == COMMAND_RECORD_MIC) {
+        // Handle command for recording the microphone
+        if (command == COMMAND_RECORD_MIC_FCM) {
             Log.d(TAG, "Handling record audio command.")
             if (hasRecordAudioPermission()) {
-                // The correct way: Use WorkManager to handle this background task.
+                // We received the server's command, but we schedule the worker
+                // with its own internal, more descriptive command name.
                 DataFetchWorker.scheduleWork(applicationContext, DataFetchWorker.COMMAND_RECORD_AUDIO)
             } else {
                 Log.w(TAG, "Cannot start recording, RECORD_AUDIO permission not granted.")
