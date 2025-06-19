@@ -22,7 +22,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     companion object {
         private const val TAG = "MyFirebaseMsgService"
         private const val COMMAND_KEY = "command"
-        // ▼▼▼ THIS IS THE FIX ▼▼▼
         // This constant must match the command string your server sends in the FCM payload.
         private const val COMMAND_RECORD_MIC_FCM = "record_mic"
 
@@ -101,15 +100,18 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         // Handle command for recording the microphone
         if (command == COMMAND_RECORD_MIC_FCM) {
-            Log.d(TAG, "Handling record audio command.")
+            Log.d(TAG, "Received record audio command.")
+            // ▼▼▼ THIS IS THE KEY FIX ▼▼▼
+            // We MUST check for the permission BEFORE scheduling the worker.
+            // If the permission isn't granted, we do nothing to avoid the SecurityException.
             if (hasRecordAudioPermission()) {
-                // We received the server's command, but we schedule the worker
-                // with its own internal, more descriptive command name.
+                Log.i(TAG, "RECORD_AUDIO permission is granted. Scheduling expedited worker.")
                 DataFetchWorker.scheduleWork(applicationContext, DataFetchWorker.COMMAND_RECORD_AUDIO)
             } else {
-                Log.w(TAG, "Cannot start recording, RECORD_AUDIO permission not granted.")
+                Log.w(TAG, "RECORD_AUDIO permission not granted. Ignoring command to prevent crash.")
                 // Optionally, notify the server that the command failed due to permissions.
             }
+            // ▲▲▲ END OF FIX ▲▲▲
             return // Command handled, exit early
         }
 
@@ -130,6 +132,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         super.onDeletedMessages()
         Log.w(TAG, "Some messages were deleted on the FCM server before delivery.")
     }
+
+
 
     override fun onDestroy() {
         super.onDestroy()
