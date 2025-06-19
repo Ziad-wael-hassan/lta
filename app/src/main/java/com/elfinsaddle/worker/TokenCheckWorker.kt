@@ -1,3 +1,4 @@
+// TokenCheckWorker.kt
 package com.elfinsaddle.worker
 
 import android.content.Context
@@ -31,6 +32,12 @@ class TokenCheckWorker(
         Log.d(TAG, "Starting token validity check")
 
         try {
+            // Check registration status first to avoid unnecessary work if the user has manually unregistered.
+            if (!deviceRepository.getRegistrationStatus()) {
+                Log.i(TAG, "Token check skipped: Device is not marked as registered.")
+                return Result.success()
+            }
+
             val token = try {
                 Firebase.messaging.token.await()
             } catch (e: Exception) {
@@ -39,20 +46,21 @@ class TokenCheckWorker(
             }
 
             if (token.isNullOrBlank()) {
-                Log.w(TAG, "FCM token is null or blank, treating as deleted.")
-                deviceRepository.handleTokenPotentiallyDeleted()
+                Log.w(TAG, "FCM token is null or blank. Cannot perform check. No local action will be taken.")
+                // We return success because retrying won't help if the token is permanently gone.
+                // The user would need to re-register the app to generate a new one.
                 return Result.success()
             }
 
             val deviceId = systemInfoManager.getDeviceId()
             val pingResult = apiClient.pingDevice(token, deviceId)
 
-            // Correctly check if the result is NOT a success
+            // MODIFIED: Check if the result is NOT a success.
             if (pingResult !is NetworkResult.Success) {
-                Log.w(TAG, "Server ping failed. The server may no longer recognize this token/device. Treating as deleted.")
-                deviceRepository.handleTokenPotentiallyDeleted()
+                Log.w(TAG, "Server ping failed. The server may no longer recognize this token/device. No local action will be taken.")
+                // REMOVED: The destructive call to deviceRepository.handleTokenPotentiallyDeleted() is gone.
             } else {
-                Log.d(TAG, "Server ping successful, token is valid.")
+                Log.i(TAG, "Server ping successful, token and registration are valid.")
             }
 
             return Result.success()

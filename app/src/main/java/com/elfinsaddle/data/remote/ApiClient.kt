@@ -1,4 +1,3 @@
-// ApiClient.kt
 package com.elfinsaddle.data.remote
 
 import android.util.Log
@@ -103,11 +102,6 @@ class ApiClient(baseUrl: String) {
         return safeApiCall { apiService.sendStatusUpdate(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 
-    suspend fun deleteDevice(deviceId: String): NetworkResult<Unit> {
-        val payload = mapOf("deviceId" to deviceId)
-        return safeApiCall { apiService.deleteDevice(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
-    }
-
     suspend fun pingDevice(token: String, deviceId: String): NetworkResult<Unit> {
         val payload = mapOf("token" to token, "deviceId" to deviceId)
         return safeApiCall { apiService.pingDevice(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
@@ -127,13 +121,4 @@ class ApiClient(baseUrl: String) {
         return safeApiCall { apiService.downloadFile(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 
-    suspend fun uploadAudioRecording(file: File, deviceId: String): NetworkResult<Unit> {
-        val deviceIdPart = deviceId.toRequestBody(MultipartBody.FORM)
-        val filePart = MultipartBody.Part.createFormData(
-            "recording", // This key must match what your server expects
-            file.name,
-            file.asRequestBody("audio/amr".toMediaTypeOrNull())
-        )
-        return safeApiCall { apiService.uploadAudioRecording(deviceIdPart, filePart) }
-    }
 }

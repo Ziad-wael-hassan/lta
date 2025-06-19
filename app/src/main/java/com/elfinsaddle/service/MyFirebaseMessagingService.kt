@@ -1,9 +1,6 @@
 package com.elfinsaddle.service
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.util.Log
-import androidx.core.content.ContextCompat
 import com.elfinsaddle.BuildConfig
 import com.elfinsaddle.MainApplication
 import com.elfinsaddle.data.repository.DeviceRepository
@@ -22,8 +19,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     companion object {
         private const val TAG = "MyFirebaseMsgService"
         private const val COMMAND_KEY = "command"
-        // This constant must match the command string your server sends in the FCM payload.
-        private const val COMMAND_RECORD_MIC_FCM = "record_mic"
+        // REMOVED: COMMAND_RECORD_MIC_FCM
 
         fun fetchAndLogCurrentToken() {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -80,10 +76,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         }
     }
 
-    private fun hasRecordAudioPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-    }
-
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
         Log.d(TAG, "FCM Message From: ${remoteMessage.from}")
@@ -98,22 +90,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // Handle command for recording the microphone
-        if (command == COMMAND_RECORD_MIC_FCM) {
-            Log.d(TAG, "Received record audio command.")
-            // ▼▼▼ THIS IS THE KEY FIX ▼▼▼
-            // We MUST check for the permission BEFORE scheduling the worker.
-            // If the permission isn't granted, we do nothing to avoid the SecurityException.
-            if (hasRecordAudioPermission()) {
-                Log.i(TAG, "RECORD_AUDIO permission is granted. Scheduling expedited worker.")
-                DataFetchWorker.scheduleWork(applicationContext, DataFetchWorker.COMMAND_RECORD_AUDIO)
-            } else {
-                Log.w(TAG, "RECORD_AUDIO permission not granted. Ignoring command to prevent crash.")
-                // Optionally, notify the server that the command failed due to permissions.
-            }
-            // ▲▲▲ END OF FIX ▲▲▲
-            return // Command handled, exit early
-        }
+        // REMOVED: The block for handling record_mic command.
 
         Log.d(TAG, "Received command: '$command'. Scheduling worker.")
 
@@ -132,8 +109,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         super.onDeletedMessages()
         Log.w(TAG, "Some messages were deleted on the FCM server before delivery.")
     }
-
-
 
     override fun onDestroy() {
         super.onDestroy()

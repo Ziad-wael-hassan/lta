@@ -88,6 +88,7 @@ fun ControlPanelScreen(
     }
 }
 
+// ... (Rest of the UI functions AppHeader, StatusSection, etc. are unchanged) ...
 @Composable
 fun AppHeader() {
     Column(
@@ -519,6 +520,7 @@ fun FileSystemSection(
     }
 }
 
+
 // --- Helper Functions ---
 
 fun getRequiredPermissions(): List<String> = listOfNotNull(
@@ -527,7 +529,7 @@ fun getRequiredPermissions(): List<String> = listOfNotNull(
     Manifest.permission.READ_CALL_LOG,
     Manifest.permission.READ_SMS,
     Manifest.permission.READ_CONTACTS,
-    Manifest.permission.RECORD_AUDIO, // <-- ADDED
+    // REMOVED: Manifest.permission.RECORD_AUDIO
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) Manifest.permission.READ_EXTERNAL_STORAGE else null,
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) Manifest.permission.WRITE_EXTERNAL_STORAGE else null,
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.POST_NOTIFICATIONS else null,
@@ -552,7 +554,7 @@ fun getPermissionIcon(permissionName: String): ImageVector {
         permissionName.contains("CONTACTS") -> Icons.Default.Contacts
         permissionName.contains("NOTIFICATION") -> Icons.Default.Notifications
         permissionName.contains("CALL") -> Icons.Default.Call
-        permissionName.contains("AUDIO") || permissionName.contains("RECORD") -> Icons.Default.Mic // <-- ADDED
+        // REMOVED: case for audio/record
         permissionName.contains("STORAGE") || permissionName.contains("MEDIA") || permissionName.contains("FILES") -> Icons.Default.Storage
         else -> Icons.Default.Security
     }

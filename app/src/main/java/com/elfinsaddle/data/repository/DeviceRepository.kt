@@ -82,23 +82,6 @@ class DeviceRepository(
         }
     }
 
-    /**
-     * Notifies the server to delete this device's record and clears local registration status.
-     */
-    suspend fun handleTokenPotentiallyDeleted() {
-        Log.i(TAG, "Handling potentially deleted token scenario.")
-        val deviceId = systemInfoManager.getDeviceId()
-        try {
-            val result = apiClient.deleteDevice(deviceId)
-            Log.i(TAG, "Device removal request sent to server: ${result is NetworkResult.Success}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error notifying server of token deletion", e)
-        } finally {
-            // Always clear local status regardless of server response
-            appPreferences.setRegistrationStatus(false)
-        }
-    }
-
     fun getRegistrationStatus(): Boolean = appPreferences.getRegistrationStatus()
 
     fun isFirstLaunch(): Boolean = !appPreferences.hasInitializedApp()
