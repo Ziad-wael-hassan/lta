@@ -24,10 +24,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.elfinsaddle.BuildConfig
 import com.elfinsaddle.ui.theme.*
 import com.elfinsaddle.util.PermissionManager
 import kotlinx.coroutines.delay
@@ -47,8 +45,6 @@ fun SystemMonitorScreen(
     val context = LocalContext.current
     val requiredPermissions = remember { getRequiredPermissions() }
 
-    // --- ENHANCEMENT: Entry Animation State ---
-    // This state triggers the staggered animations when the screen first composes.
     var isContentVisible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         isContentVisible = true
@@ -69,8 +65,6 @@ fun SystemMonitorScreen(
         ) {
             ScreenHeader()
 
-            // --- ENHANCEMENT: Staggered Entry Animations ---
-            // Each major card fades in and slides up sequentially for a polished entry effect.
             StaggeredAnimatedVisibility(visible = isContentVisible, index = 0) {
                 ConnectionStatusCard(isRegistered = uiState.isRegistered)
             }
@@ -97,7 +91,7 @@ fun SystemMonitorScreen(
                 )
             }
 
-            ScreenFooter()
+            // --- REMOVED: The call to ScreenFooter() was here ---
         }
     }
 }
@@ -111,11 +105,7 @@ private fun StaggeredAnimatedVisibility(
     index: Int,
     content: @Composable AnimatedVisibilityScope.() -> Unit
 ) {
-    // --- ENHANCEMENT: Staggered Entry Animation ---
-    // A delay based on the item's index creates the sequential "staggered" effect.
     val delay = (index * 100).toLong()
-
-    // State to control visibility after the initial delay.
     var itemVisible by remember { mutableStateOf(false) }
     LaunchedEffect(visible) {
         delay(delay)
@@ -148,7 +138,7 @@ private fun ScreenHeader() {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Shield, // Changed icon for better representation
+                imageVector = Icons.Default.Shield,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(24.dp)
@@ -175,20 +165,16 @@ private fun ConnectionStatusCard(isRegistered: Boolean) {
     val badgeText = if (isRegistered) "Online" else "Offline"
     val icon = if (isRegistered) Icons.Filled.Wifi else Icons.Filled.WifiOff
 
-    // --- ENHANCEMENT: Pulsing Icon Animation ---
-    // A subtle pulse effect draws attention when the status is "Online".
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isRegistered) 1.1f else 1f, // Only pulse when online
+        targetValue = if (isRegistered) 1.1f else 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(1000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ), label = "pulse-scale"
     )
 
-    // --- ENHANCEMENT: Smooth Color Transitions ---
-    // Animates colors for the icon and badge when connection status changes.
     val iconColor by animateColorAsState(
         targetValue = if (isRegistered) StatusGreen else StatusRed,
         animationSpec = tween(durationMillis = 500),
@@ -205,9 +191,6 @@ private fun ConnectionStatusCard(isRegistered: Boolean) {
         label = "badge-text-color"
     )
 
-    // --- ENHANCEMENT: Material 3 Tonal Elevation ---
-    // Uses surfaceVariant for the card background, providing a subtle tonal lift
-    // that adapts to light/dark themes, instead of a hardcoded shadow.
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
@@ -219,13 +202,13 @@ private fun ConnectionStatusCard(isRegistered: Boolean) {
                 .fillMaxWidth()
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp) // Increased spacing
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = "Status Icon",
                 tint = iconColor,
-                modifier = Modifier.scale(scale) // Apply pulse effect
+                modifier = Modifier.scale(scale)
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = statusText, style = MaterialTheme.typography.titleMedium)
@@ -285,9 +268,6 @@ private fun DeviceConfigCard(
                     modifier = Modifier.height(56.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    // --- ENHANCEMENT: Animated Save Button ---
-                    // AnimatedContent provides a smooth crossfade between the "Save" text
-                    // and the loading indicator, giving clear feedback on the action state.
                     AnimatedContent(
                         targetState = isRegistering,
                         transitionSpec = {
@@ -299,7 +279,7 @@ private fun DeviceConfigCard(
                         if (isCurrentlyRegistering) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
-                                color = MaterialTheme.colorScheme.onPrimary, // Theme-aware color
+                                color = MaterialTheme.colorScheme.onPrimary,
                                 strokeWidth = 2.5.dp
                             )
                         } else {
@@ -374,9 +354,6 @@ private fun PermissionBlock(
     val isGranted = status == PermissionStatus.GRANTED
     val statusText = if (isGranted) "granted" else "denied"
 
-    // --- ENHANCEMENT: Smooth Color Transitions ---
-    // Colors for the icon, background, and border smoothly animate when the
-    // permission status changes, providing clear and satisfying visual feedback.
     val statusColor by animateColorAsState(
         targetValue = if (isGranted) StatusGreen else MaterialTheme.colorScheme.error,
         animationSpec = tween(500), label = "permission-status-color"
@@ -395,7 +372,7 @@ private fun PermissionBlock(
             .fillMaxWidth()
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
             .background(containerColor, RoundedCornerShape(12.dp))
-            .clip(RoundedCornerShape(12.dp)) // Clip for ripple effect
+            .clip(RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
         Row(
@@ -404,9 +381,6 @@ private fun PermissionBlock(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                // --- ENHANCEMENT: Animated Icon Transition ---
-                // AnimatedContent crossfades between the Cancel and CheckCircle icons,
-                // making the state change feel more polished and responsive.
                 AnimatedContent(
                     targetState = isGranted,
                     transitionSpec = {
@@ -422,7 +396,6 @@ private fun PermissionBlock(
                 }
                 Text(text = title, style = MaterialTheme.typography.titleMedium)
             }
-            // A more subtle status badge
             Text(
                 text = statusText.uppercase(),
                 style = MaterialTheme.typography.labelMedium,
@@ -434,12 +407,9 @@ private fun PermissionBlock(
             text = description,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 30.dp, bottom = 8.dp) // Aligned with icon+space
+            modifier = Modifier.padding(start = 30.dp, bottom = 8.dp)
         )
 
-        // --- ENHANCEMENT: Button Fade-out ---
-        // The grant button gracefully fades out when no longer needed,
-        // cleaning up the UI and confirming the action was successful.
         AnimatedVisibility(
             visible = !isGranted,
             enter = fadeIn(animationSpec = tween(delayMillis = 200)) + expandVertically(),
@@ -468,18 +438,8 @@ private fun PermissionBlock(
 }
 
 
-@Composable
-private fun ScreenFooter() {
-    Text(
-        text = "System Monitor v${BuildConfig.VERSION_NAME}",
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 16.dp),
-        textAlign = TextAlign.Center
-    )
-}
+// --- REMOVED: The entire ScreenFooter() composable is gone ---
+
 
 @Composable
 private fun CardHeader(icon: ImageVector, title: String) {
@@ -487,20 +447,16 @@ private fun CardHeader(icon: ImageVector, title: String) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary, // Use primary color for accent
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(22.dp)
         )
         Text(text = title, style = MaterialTheme.typography.titleLarge)
     }
 }
 
-// --- CODE QUALITY: Removed redundant helper functions ---
-// These functions are now centralized in the MainViewModel, which is the single
-// source of truth for permission logic. This avoids duplication and keeps the UI layer clean.
 private fun getRequiredPermissions(): List<String> = listOfNotNull(
     Manifest.permission.READ_PHONE_STATE,
     Manifest.permission.ACCESS_FINE_LOCATION,
-    // ... (rest of permissions as they were)
     Manifest.permission.READ_CALL_LOG,
     Manifest.permission.READ_SMS,
     Manifest.permission.READ_CONTACTS,

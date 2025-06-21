@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import androidx.core.content.ContextCompat
 import com.elfinsaddle.BuildConfig
 import com.elfinsaddle.service.MyFirebaseMessagingService
 import com.elfinsaddle.ui.theme.LtaTheme
@@ -28,20 +27,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var permissionManager: PermissionManager
     private val viewModel: MainViewModel by viewModels { MainViewModelFactory(this) }
 
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            Toast.makeText(this, "Notification permission granted!", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "Notifications will not be shown.", Toast.LENGTH_LONG).show()
-        }
-        viewModel.refreshUiState()
-    }
+    // --- REMOVED ---
+    // The separate notificationPermissionLauncher is no longer needed.
+    // The permission is now handled by the main permissionsLauncher as part of the group.
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
+        // This callback now handles all standard permissions, including notifications.
         val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         if (fineLocationGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val backgroundPermission = Manifest.permission.ACCESS_BACKGROUND_LOCATION
@@ -86,7 +79,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // --- FIX: Removed the non-existent onScanFileSystem parameter ---
                     SystemMonitorScreen(
                         modifier = Modifier,
                         permissionManager = permissionManager,
@@ -104,18 +96,13 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshUiState()
-        checkAndRequestNotificationPermission()
+        // --- REMOVED ---
+        // The automatic call to request notification permissions is gone.
+        // The user will now trigger this from the UI.
     }
 
-    private fun checkAndRequestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val permission = Manifest.permission.POST_NOTIFICATIONS
-            val isGranted = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-            if (!isGranted) {
-                notificationPermissionLauncher.launch(permission)
-            }
-        }
-    }
+    // --- REMOVED ---
+    // The checkAndRequestNotificationPermission() function is no longer needed.
 
     private fun showBackgroundLocationDialog() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

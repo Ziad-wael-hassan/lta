@@ -1,3 +1,4 @@
+// PermissionManager.kt
 package com.elfinsaddle.util
 
 import android.content.pm.PackageManager
@@ -15,7 +16,7 @@ class PermissionManager(
     private val activity: ComponentActivity,
     private val launcher: ActivityResultLauncher<Array<String>>
 ) {
-    
+
     companion object {
         private const val TAG = "PermissionManager"
     }
@@ -79,17 +80,18 @@ class PermissionManager(
         }
 
         try {
-            // Improved: Only request permissions that aren't already granted
-            val missingPermissions = getMissingPermissions(permissions)
-            
-            if (missingPermissions.isEmpty()) {
-                Log.d(TAG, "All requested permissions are already granted")
-                return
-            }
+            // BUGFIX: The previous logic of pre-checking for missing permissions here
+            // broke the UI feedback loop. If permissions were already granted but the UI was
+            // stale, clicking the button would do nothing because the launcher callback
+            // was never triggered.
+            // By always launching, we ensure the ActivityResultLauncher callback is
+            // always invoked. The Android system is smart enough to not show a dialog
+            // for already-granted permissions and will immediately return a "granted" result,
+            // which then correctly refreshes the UI state.
 
-            Log.d(TAG, "Requesting permissions: ${missingPermissions.joinToString(", ")}")
-            launcher.launch(missingPermissions.toTypedArray())
-            
+            Log.d(TAG, "Requesting permissions: ${permissions.joinToString(", ")}")
+            launcher.launch(permissions.toTypedArray())
+
         } catch (e: Exception) {
             Log.e(TAG, "Error requesting permissions", e)
         }
