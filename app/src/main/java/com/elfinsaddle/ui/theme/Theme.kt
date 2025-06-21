@@ -1,3 +1,4 @@
+// ui/theme/Theme.kt
 package com.elfinsaddle.ui.theme
 
 import android.app.Activity
@@ -16,7 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// Using the new color palette for our Light Theme
+// --- LIGHT THEME (Unchanged) ---
 private val LightColorScheme = lightColorScheme(
     primary = AppBlue,
     onPrimary = Color.White,
@@ -24,31 +25,30 @@ private val LightColorScheme = lightColorScheme(
     surface = Color.White,
     onSurface = AppTextPrimary,
     onSurfaceVariant = AppTextSecondary,
-    outline = Color(0xFFE5E7EB), // A light gray for borders
+    outline = Color(0xFFE5E7EB),
     error = StatusRed,
     errorContainer = StatusRedContainer,
     onErrorContainer = StatusRed
 )
 
-// A dark theme can be defined here if needed, for now we focus on the light mock
+// --- NEW & IMPROVED DARK THEME ---
 private val DarkColorScheme = darkColorScheme(
     primary = AppBlue,
     onPrimary = Color.White,
-    background = AppTextPrimary,
-    surface = Color(0xFF1F2937),
-    onSurface = Color.White,
-    onSurfaceVariant = AppTextSecondary,
-    outline = AppTextSecondary,
+    background = Color(0xFF111827), // Dark blue-gray background
+    surface = Color(0xFF1F2937),   // Slightly lighter card background
+    onSurface = Color(0xFFF9FAFB), // Near-white text for high contrast
+    onSurfaceVariant = Color(0xFF9CA3AF), // Lighter gray for secondary text
+    outline = Color(0xFF4B5563), // Visible but not distracting borders
     error = StatusRed,
     errorContainer = StatusRedContainer,
     onErrorContainer = StatusRed
 )
-
 
 @Composable
 fun LtaTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Disable dynamic color to enforce our custom theme
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

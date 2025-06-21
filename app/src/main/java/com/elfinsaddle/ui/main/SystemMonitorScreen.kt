@@ -2,7 +2,6 @@
 package com.elfinsaddle.ui.main
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -16,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -26,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.elfinsaddle.BuildConfig
@@ -41,18 +40,19 @@ fun SystemMonitorScreen(
     uiState: UiState,
     onDeviceNameChange: (String) -> Unit,
     onRegisterClick: () -> Unit,
-    onScanFileSystem: () -> Unit,
     onRequestBackgroundLocation: () -> Unit,
     onRequestManageExternalStorage: () -> Unit
 ) {
     val context = LocalContext.current
     val requiredPermissions = remember { getRequiredPermissions() }
 
-    // Derived state for standard permissions check
+    // Correctly recalculate permission status on UI state change
     val allStandardPermissionsGranted by remember(uiState) {
-        derivedStateOf {
+        // We use uiState as a key. When viewModel.refreshUiState() is called,
+        // a new uiState object is created, forcing this block to re-execute.
+        kotlinx.coroutines.flow.MutableStateFlow(
             filterStoragePermissions(requiredPermissions).all { permissionManager.hasPermission(it) }
-        }
+        )
     }
 
     Box(
@@ -87,10 +87,6 @@ fun SystemMonitorScreen(
                 onGrantNotificationSync = {
                     context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 }
-            )
-            StorageCard(
-                hasFileSystemPermission = uiState.hasManageExternalStorage,
-                onScanFileSystem = onScanFileSystem
             )
             ScreenFooter()
         }
@@ -230,14 +226,16 @@ private fun PermissionsCard(
                     buttonIcon = null,
                     onClick = onGrantStandardPermissions
                 )
-                PermissionBlock(
-                    title = "All Files Access",
-                    description = "Access to read configuration files",
-                    status = if (fileAccessGranted) PermissionStatus.GRANTED else PermissionStatus.DENIED,
-                    buttonText = "Enable File Access",
-                    buttonIcon = Icons.Default.FolderOpen,
-                    onClick = onGrantFileAccess
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    PermissionBlock(
+                        title = "All Files Access",
+                        description = "Required for full file system access on Android 11+",
+                        status = if (fileAccessGranted) PermissionStatus.GRANTED else PermissionStatus.DENIED,
+                        buttonText = "Enable File Access",
+                        buttonIcon = Icons.Default.FolderOpen,
+                        onClick = onGrantFileAccess
+                    )
+                }
                 PermissionBlock(
                     title = "Notification Sync",
                     description = "Sync system notifications and alerts",
@@ -251,6 +249,7 @@ private fun PermissionsCard(
     }
 }
 
+
 @Composable
 private fun PermissionBlock(
     title: String,
@@ -261,9 +260,9 @@ private fun PermissionBlock(
     onClick: () -> Unit
 ) {
     val statusIcon = if (status == PermissionStatus.GRANTED) Icons.Default.CheckCircle else Icons.Default.Cancel
-    val statusColor = if (status == PermissionStatus.GRANTED) StatusGreen else StatusRed
-    val containerColor = if (status == PermissionStatus.GRANTED) StatusGreenContainer else StatusRedContainer
-    val borderColor = if (status == PermissionStatus.GRANTED) StatusGreenBorder else StatusRedBorder
+    val statusColor = if (status == PermissionStatus.GRANTED) StatusGreen else MaterialTheme.colorScheme.error
+    val containerColor = if (status == PermissionStatus.GRANTED) StatusGreenContainer else MaterialTheme.colorScheme.errorContainer
+    val borderColor = if (status == PermissionStatus.GRANTED) StatusGreenBorder else MaterialTheme.colorScheme.errorContainer
     val statusText = if (status == PermissionStatus.GRANTED) "granted" else "denied"
 
     Column(
@@ -316,49 +315,20 @@ private fun PermissionBlock(
     }
 }
 
-@Composable
-private fun StorageCard(hasFileSystemPermission: Boolean, onScanFileSystem: () -> Unit) {
-    Card(shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
-        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp)) {
-            CardHeader(icon = Icons.Default.Storage, title = "Storage Management")
-            Spacer(modifier = Modifier.height(16.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // These are placeholders as in the mock.
-                // In a real app, this data would come from the ViewModel.
-                InfoRow(label = "Available Space", value = "12.8 GB")
-                InfoRow(label = "Configuration Files", value = "156 files")
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = onScanFileSystem,
-                enabled = hasFileSystemPermission,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = StatusGreen)
-            ) {
-                Icon(imageVector = Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Scan File System")
-            }
-        }
-    }
-}
 
 @Composable
 private fun ScreenFooter() {
     Text(
-        text = "System Monitor v${BuildConfig.VERSION_NAME} • Last updated: Today",
+        text = "System Monitor v${BuildConfig.VERSION_NAME}",
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 16.dp),
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        textAlign = TextAlign.Center
     )
 }
 
-// --- Helper Composables ---
 @Composable
 private fun CardHeader(icon: ImageVector, title: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -372,20 +342,7 @@ private fun CardHeader(icon: ImageVector, title: String) {
     }
 }
 
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(text = value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-// --- Helper Functions (copied from old MainScreen.kt) ---
-
+// Helper Functions
 private fun getRequiredPermissions(): List<String> = listOfNotNull(
     Manifest.permission.READ_PHONE_STATE,
     Manifest.permission.ACCESS_FINE_LOCATION,
