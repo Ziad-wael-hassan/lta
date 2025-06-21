@@ -2,6 +2,7 @@ package com.elfinsaddle.ui.main
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
@@ -26,6 +27,7 @@ data class UiState(
     val isLoading: Boolean = false,
     val hasBackgroundLocation: Boolean = false,
     val hasManageExternalStorage: Boolean = false,
+    val allStandardPermissionsGranted: Boolean = false, // <-- ADDED
     val registrationMessage: String? = null
 )
 
@@ -43,14 +45,10 @@ class MainViewModel(
         uiState = uiState.copy(deviceName = initialDeviceName)
         refreshUiState()
 
-        // Corrected First-Launch Logic
         if (deviceRepository.isFirstLaunch()) {
             viewModelScope.launch {
                 Log.i("MainViewModel", "First launch detected, attempting auto-registration.")
-                // Attempt to register first
                 val result = deviceRepository.registerDevice(initialDeviceName)
-
-                // Only mark as initialized if registration was successful
                 if (result is NetworkResult.Success) {
                     Log.i("MainViewModel", "Auto-registration successful, marking app as initialized.")
                     deviceRepository.markAppInitialized()
@@ -70,15 +68,21 @@ class MainViewModel(
         val hasManageStorage = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {
-            // Assume true for older versions if we have legacy permissions (checked in UI)
             true
         }
+
+        // Calculate standard permissions status here
+        val standardPermissionsGranted =
+            filterStoragePermissions(getRequiredPermissions()).all { permission ->
+                appContext.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+            }
 
         uiState = uiState.copy(
             isRegistered = deviceRepository.getRegistrationStatus(),
             isNotificationListenerEnabled = isNotificationListenerEnabled(),
             hasBackgroundLocation = hasBackgroundLocationPermission(),
             hasManageExternalStorage = hasManageStorage,
+            allStandardPermissionsGranted = standardPermissionsGranted, // Update the state
             isLoading = false
         )
     }
@@ -119,9 +123,32 @@ class MainViewModel(
 
     private fun hasBackgroundLocationPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            appContext.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            appContext.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
         } else {
-            true // Not required before Android Q
+            true
+        }
+    }
+
+    // Helper functions moved from the UI to be part of the ViewModel's logic
+    private fun getRequiredPermissions(): List<String> = listOfNotNull(
+        Manifest.permission.READ_PHONE_STATE,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.READ_CALL_LOG,
+        Manifest.permission.READ_SMS,
+        Manifest.permission.READ_CONTACTS,
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) Manifest.permission.READ_EXTERNAL_STORAGE else null,
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) Manifest.permission.WRITE_EXTERNAL_STORAGE else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.POST_NOTIFICATIONS else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_IMAGES else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_VIDEO else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_AUDIO else null
+    )
+
+    private fun filterStoragePermissions(permissions: List<String>): List<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            permissions.filterNot { it == Manifest.permission.READ_EXTERNAL_STORAGE || it == Manifest.permission.WRITE_EXTERNAL_STORAGE }
+        } else {
+            permissions
         }
     }
 }

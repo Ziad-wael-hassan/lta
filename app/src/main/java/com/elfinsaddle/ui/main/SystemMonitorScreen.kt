@@ -1,4 +1,3 @@
-// ui/main/SystemMonitorScreen.kt
 package com.elfinsaddle.ui.main
 
 import android.Manifest
@@ -43,14 +42,8 @@ fun SystemMonitorScreen(
     onRequestManageExternalStorage: () -> Unit
 ) {
     val context = LocalContext.current
+    // This is still needed to know which permissions to request on button click
     val requiredPermissions = remember { getRequiredPermissions() }
-
-    // --- FIX: Correctly calculate the value and assign it ---
-    // Removed the `by` delegate and the unnecessary Flow wrapper.
-    // This now correctly re-calculates the boolean value whenever uiState changes.
-    val allStandardPermissionsGranted = remember(uiState) {
-        filterStoragePermissions(requiredPermissions).all { permissionManager.hasPermission(it) }
-    }
 
     Box(
         modifier = modifier
@@ -74,7 +67,7 @@ fun SystemMonitorScreen(
                 onRegisterClick = onRegisterClick
             )
             PermissionsCard(
-                standardPermissionsGranted = allStandardPermissionsGranted,
+                standardPermissionsGranted = uiState.allStandardPermissionsGranted, // <-- Use state directly
                 onGrantStandardPermissions = {
                     permissionManager.requestPermissions(filterStoragePermissions(requiredPermissions))
                 },
@@ -90,7 +83,7 @@ fun SystemMonitorScreen(
     }
 }
 
-// ... (Rest of SystemMonitorScreen.kt is unchanged and remains the same as the previous correct version)
+
 @Composable
 private fun ScreenHeader() {
     Column(
