@@ -18,8 +18,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import com.elfinsaddle.BuildConfig // Import BuildConfig
-import com.elfinsaddle.service.MyFirebaseMessagingService // Import your service
+import com.elfinsaddle.BuildConfig
+import com.elfinsaddle.service.MyFirebaseMessagingService
 import com.elfinsaddle.ui.theme.LtaTheme
 import com.elfinsaddle.util.PermissionManager
 
@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var permissionManager: PermissionManager
     private val viewModel: MainViewModel by viewModels { MainViewModelFactory(this) }
 
-    // --- NEW: Launcher for the Android 13+ Notification Permission ---
+    // Launcher for the Android 13+ Notification Permission
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -37,10 +37,10 @@ class MainActivity : ComponentActivity() {
         } else {
             Toast.makeText(this, "Notifications will not be shown.", Toast.LENGTH_LONG).show()
         }
-        viewModel.refreshUiState() // Refresh UI to reflect permission state if needed
+        viewModel.refreshUiState() // Refresh UI to reflect permission state
     }
-    // -------------------------------------------------------------------
 
+    // Launcher for standard permissions (location, contacts, etc.)
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshUiState()
     }
 
+    // Launcher for the "All Files Access" setting screen
     private val manageExternalStorageLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -73,13 +74,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         permissionManager = PermissionManager(this, permissionsLauncher)
 
-        // --- NEW: Manually fetch and log FCM token on app start for debugging ---
-        // This only runs in DEBUG builds and is useful for checking the token
-        // in release builds when connected to Logcat.
+        // Manually fetch and log FCM token on app start for debugging
         if (BuildConfig.DEBUG) {
             MyFirebaseMessagingService.fetchAndLogCurrentToken()
         }
-        // -----------------------------------------------------------------------
 
         setContent {
             LtaTheme {
@@ -93,7 +91,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    ControlPanelScreen(
+                    // --- REPLACED UI ---
+                    // The old ControlPanelScreen is replaced with the new SystemMonitorScreen.
+                    // All the state and event handlers are passed to the new UI.
+                    SystemMonitorScreen(
                         modifier = Modifier,
                         permissionManager = permissionManager,
                         uiState = uiState,
@@ -114,12 +115,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshUiState()
-        // --- NEW: Check for and request notification permission on resume ---
+        // Check for and request notification permission on resume
         checkAndRequestNotificationPermission()
-        // --------------------------------------------------------------------
     }
 
-    // --- NEW: Function to handle notification permission request ---
+    // Function to handle notification permission request for Android 13+
     private fun checkAndRequestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val permission = Manifest.permission.POST_NOTIFICATIONS
@@ -130,8 +130,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    // ---------------------------------------------------------------
 
+    // Directs the user to app settings to grant background location
     private fun showBackgroundLocationDialog() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Toast.makeText(this, "Please select 'Allow all the time' in app settings for location access.", Toast.LENGTH_LONG).show()
@@ -142,6 +142,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Directs the user to the "All Files Access" screen on Android 11+
     private fun requestManageExternalStoragePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -150,7 +151,7 @@ class MainActivity : ComponentActivity() {
                 }
                 manageExternalStorageLauncher.launch(intent)
             } catch (e: Exception) {
-                // Fallback for some devices
+                // Fallback for some devices that might not respond to the specific package URI
                 val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
                 manageExternalStorageLauncher.launch(intent)
             }
