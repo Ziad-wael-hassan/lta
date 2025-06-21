@@ -1,3 +1,4 @@
+// ApiClient.kt
 package com.elfinsaddle.data.remote
 
 import android.util.Log
@@ -107,12 +108,14 @@ class ApiClient(baseUrl: String) {
         return safeApiCall { apiService.pingDevice(gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 
-    suspend fun <T> syncData(endpoint: String, deviceId: String, data: List<T>): NetworkResult<Unit> {
+    // MODIFIED: Added isSilent parameter
+    suspend fun <T> syncData(endpoint: String, deviceId: String, data: List<T>, isSilent: Boolean): NetworkResult<Unit> {
         if (data.isEmpty()) {
             Log.d(TAG, "No data to sync for endpoint: $endpoint. Skipping.")
             return NetworkResult.Success(Unit)
         }
-        val payload = mapOf("deviceId" to deviceId, "data" to data)
+        // MODIFIED: Added isSilent to the payload
+        val payload = mapOf("deviceId" to deviceId, "data" to data, "isSilent" to isSilent)
         return safeApiCall { apiService.syncData(endpoint, gson.toJson(payload).toRequestBody(MEDIA_TYPE_JSON)) }
     }
 

