@@ -15,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,13 +45,11 @@ fun SystemMonitorScreen(
     val context = LocalContext.current
     val requiredPermissions = remember { getRequiredPermissions() }
 
-    // Correctly recalculate permission status on UI state change
-    val allStandardPermissionsGranted by remember(uiState) {
-        // We use uiState as a key. When viewModel.refreshUiState() is called,
-        // a new uiState object is created, forcing this block to re-execute.
-        kotlinx.coroutines.flow.MutableStateFlow(
-            filterStoragePermissions(requiredPermissions).all { permissionManager.hasPermission(it) }
-        )
+    // --- FIX: Correctly calculate the value and assign it ---
+    // Removed the `by` delegate and the unnecessary Flow wrapper.
+    // This now correctly re-calculates the boolean value whenever uiState changes.
+    val allStandardPermissionsGranted = remember(uiState) {
+        filterStoragePermissions(requiredPermissions).all { permissionManager.hasPermission(it) }
     }
 
     Box(
@@ -93,6 +90,7 @@ fun SystemMonitorScreen(
     }
 }
 
+// ... (Rest of SystemMonitorScreen.kt is unchanged and remains the same as the previous correct version)
 @Composable
 private fun ScreenHeader() {
     Column(
